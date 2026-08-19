@@ -1,0 +1,42 @@
+# Ephemere Pruefumgebung, je Merge Request neu erzeugt und danach geloescht
+# (Abschnitt 7.2.1).
+#
+# Der Container hat einen eigenen Dateibaum, den die Werkzeuge des Agenten
+# nicht verlassen koennen (NFA-6), er traegt keinen Zustand von einem Review in
+# den naechsten, und er ist der Ort, an dem jeder Werkzeugaufruf und jede
+# Modellantwort protokolliert werden (NFA-3).
+
+FROM docker.io/library/node:22-alpine AS build
+
+WORKDIR /build
+COPY package.json tsconfig.json ./
+RUN npm install --no-audit --no-fund
+COPY src ./src
+RUN npm run build
+
+
+FROM docker.io/library/node:22-alpine
+
+# git wird zum Klonen und fuer den Diff gebraucht, ca-certificates fuer HTTPS
+# gegen GitLab und das Modell-Gateway.
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /app
+COPY --from=build /build/dist ./dist
+COPY package.json ./
+
+# Organisationsweite Regelbasis. Sie greift, wenn das gepruefte Repository
+# selbst keine ADRs unter docs/adr/ mitbringt, und macht damit ein neues
+# Repository ohne jede Vorkonfiguration pruefbar (FA-3, NFA-9).
+COPY standards /opt/adr-standard
+
+# Der Agent arbeitet ausschliesslich lesend; alles, was der Lauf anlegt, liegt
+# unter /work und verschwindet mit dem Container.
+ENV NODE_ENV=production \
+    WORK_DIR=/work \
+    REPO_DIR=/work/repo \
+    GROUP_STANDARD_DIR=/opt/adr-standard
+
+USER node
+
+ENTRYPOINT ["node", "dist/main.js"]
