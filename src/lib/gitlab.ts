@@ -9,11 +9,12 @@
  */
 
 import { Gitlab } from "@gitbeaker/rest";
-import { env } from "./env";
+import { gitLabCredentials } from "./env";
 import type { MergeRequestContext } from "./types";
 
-function client() {
-  return new Gitlab({ host: env.gitlabHost, token: env.gitlabToken });
+function client(repoUrl: string) {
+  const credentials = gitLabCredentials(repoUrl);
+  return new Gitlab({ host: credentials.host, token: credentials.token });
 }
 
 /**
@@ -23,8 +24,9 @@ function client() {
 export async function loadMergeRequestContext(
   projectId: number,
   mrIid: number,
+  repoUrl: string,
 ): Promise<MergeRequestContext> {
-  const api = client();
+  const api = client(repoUrl);
   const [mr, project] = await Promise.all([
     api.MergeRequests.show(projectId, mrIid),
     api.Projects.show(projectId),
@@ -62,8 +64,9 @@ export interface MergeRequestDiff {
 export async function listMergeRequestDiffs(
   projectId: number,
   mrIid: number,
+  repoUrl: string,
 ): Promise<MergeRequestDiff[]> {
-  const api = client();
+  const api = client(repoUrl);
   return (await api.MergeRequests.allDiffs(projectId, mrIid)) as MergeRequestDiff[];
 }
 
@@ -72,8 +75,9 @@ export async function createNote(
   projectId: number,
   mrIid: number,
   body: string,
+  repoUrl: string,
 ): Promise<number> {
-  const api = client();
+  const api = client(repoUrl);
   const note = await api.MergeRequestNotes.create(projectId, mrIid, body);
   return Number(note.id);
 }
@@ -82,8 +86,9 @@ export async function deleteNote(
   projectId: number,
   mrIid: number,
   noteId: number,
+  repoUrl: string,
 ): Promise<void> {
-  const api = client();
+  const api = client(repoUrl);
   await api.MergeRequestNotes.remove(projectId, mrIid, noteId);
 }
 
@@ -107,15 +112,17 @@ export async function createInlineDiscussion(
   body: string,
   diffRefs: NonNullable<MergeRequestContext["diffRefs"]>,
   position: DiscussionPosition,
+  repoUrl: string,
 ): Promise<string | null> {
+  const credentials = gitLabCredentials(repoUrl);
   const url =
-    `${env.gitlabHost}/api/v4/projects/${encodeURIComponent(String(projectId))}` +
+    `${credentials.host}/api/v4/projects/${encodeURIComponent(String(projectId))}` +
     `/merge_requests/${mrIid}/discussions`;
 
   const response = await fetch(url, {
     method: "POST",
     headers: {
-      "PRIVATE-TOKEN": env.gitlabToken,
+      "PRIVATE-TOKEN": credentials.token,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -142,8 +149,9 @@ export async function createFallbackComment(
   projectId: number,
   mrIid: number,
   body: string,
+  repoUrl: string,
 ): Promise<string> {
-  const api = client();
+  const api = client(repoUrl);
   const discussion = await api.MergeRequestDiscussions.create(
     projectId,
     mrIid,
@@ -158,8 +166,9 @@ export async function createFallbackComment(
  * nicht in der Prozessliste des Hosts auftaucht.
  */
 export function authenticatedRepoUrl(repoUrl: string): string {
+  const credentials = gitLabCredentials(repoUrl);
   const url = new URL(repoUrl);
   url.username = "oauth2";
-  url.password = env.gitlabToken;
+  url.password = credentials.token;
   return url.toString();
 }

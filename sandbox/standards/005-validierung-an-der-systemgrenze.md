@@ -1,43 +1,69 @@
-# ADR-0005: Eingehende Daten werden an der Systemgrenze validiert
+# ADR-0005: Nicht vertrauenswürdige Eingaben werden zur Laufzeit geprüft
 
 ## Status
 
-accepted (2026-02-25)
+accepted (2026-10-29)
 
 ## Kontext
 
-Eingehende HTTP-Nutzlasten wurden in mehreren Diensten unmittelbar
-weiterverarbeitet und dabei lediglich per Typzusicherung (`as`) auf die
-erwartete Form gebracht. Eine Typzusicherung prüft zur Laufzeit nichts, sodass
-fehlerhafte oder böswillige Eingaben erst tief in der Verarbeitung auffielen,
-teils erst in der Datenbankschicht. Auch fehlende Umgebungsvariablen fielen
-erst beim ersten Zugriff auf, also mitten im Betrieb statt beim Start.
+Software verarbeitet Daten aus Quellen, deren Inhalt oder Zustand nicht allein
+durch die Quellcode-Typen garantiert ist: etwa Anfragen, Dateien, Nachrichten,
+Importe, Datenbanken, externe Dienste und Konfiguration. Statische Typangaben
+oder Annahmen über das erwartete Format prüfen diese Daten nicht zur Laufzeit.
+Werden ungültige oder böswillig präparierte Werte ungeprüft weitergereicht,
+entstehen schwer lokalisierbare Fehler, Datenkorruption oder
+Sicherheitslücken. Eine Prüfung an einer nachvollziehbaren Grenze macht
+Verantwortung und Fehlerbehandlung sichtbar.
 
 ## Entscheidung
 
-Wir werden jede Eingabe von außen an der Systemgrenze zur Laufzeit gegen ein
-Schema prüfen, bevor sie weiterverarbeitet wird.
+Wir werden Daten an jeder relevanten Vertrauens- oder Formatgrenze zur Laufzeit
+prüfen und in eine für die weitere Verarbeitung verlässliche Form überführen.
+Die konkrete Validierungstechnik und der geeignete Ort richten sich nach dem
+Projekt und der jeweiligen Datenquelle.
 
-- Jeder Anfragekörper wird über ein Schema validiert; die Verarbeitung erhält
-  ausschließlich das Ergebnis dieser Validierung.
-- Auf `request.body`, `req.query` und `req.params` wird ausschließlich in der
-  Validierungsschicht der jeweiligen Route zugegriffen, nicht in der
-  Geschäftslogik.
-- Eine Typzusicherung mit `as` ersetzt keine Validierung und ist für Daten von
-  außen nicht zulässig.
-- Die benötigten Umgebungsvariablen werden beim Start des Prozesses zentral
-  geprüft, sodass der Dienst bei fehlender Konfiguration nicht startet.
+- Geprüft werden mindestens Struktur, erforderliche Felder, Datentypen,
+  Wertebereiche und für die fachliche Verwendung relevante Invarianten.
+  Sicherheitsrelevante Zeichenfolgen werden nicht allein durch
+  Oberflächenprüfung als sicher behandelt; sie sind für den jeweiligen
+  Zielkontext angemessen zu verwenden oder zu kodieren.
+- Nach erfolgreicher Prüfung erhält nachfolgender Code einen klar beschriebenen
+  Wert beziehungsweise Datentyp. Ungeprüfte Rohdaten sollen nicht unbemerkt in
+  fachliche Operationen gelangen.
+- Eine statische Typdeklaration, ein Cast oder eine Vertrauensannahme ersetzt
+  keine Prüfung der tatsächlichen Laufzeitdaten.
+- Eingabefehler werden kontrolliert und verständlich behandelt. Fehlermeldungen
+  nennen die betroffene Eingabe oder Regel, soweit zulässig, aber legen keine
+  sensiblen Daten, internen Implementierungsdetails oder Stacktraces offen.
+- Validierung und Autorisierung bleiben unterschiedliche Prüfungen: Gültige
+  Form und Werte beweisen nicht, dass eine Person oder ein Prozess die
+  angeforderte Aktion ausführen darf.
+- Dauerhafte Daten werden, wo mehrere Schreibpfade oder externe Änderungen
+  möglich sind, auch an der Persistenzgrenze gegen relevante Integritätsregeln
+  geschützt.
+- Kritische Konfiguration wird frühzeitig geprüft; ein unvollständiger oder
+  widersprüchlicher Zustand wird nicht erst bei zufälliger späterer Nutzung
+  entdeckt (siehe ADR-0002).
+- Prüfschemata beziehungsweise gleichwertige Prüfungen werden dort getestet,
+  wo ungültige Eingaben zu relevanten fachlichen oder sicherheitsbezogenen
+  Folgen führen könnten.
 
 ## Considered Options
 
-- Prüfung erst in der Geschäftslogik: verworfen, weil dann jede Aufrufstelle
-  ihre eigene Prüfung mitbringen muss.
-- Validierung ausschließlich über Typen zur Übersetzungszeit: verworfen, weil
-  Typen zur Laufzeit nicht existieren.
+- Prüfung nur am äußersten Transportadapter: verworfen, wenn weitere
+  Vertrauensgrenzen oder alternative Aufrufwege ungeprüfte Daten einführen.
+- Ausschließliche Prüfung zur Übersetzungszeit: verworfen, weil externe Daten
+  zur Laufzeit andere Werte enthalten können als im Quellcode angenommen.
+- Eine universelle Schema-Bibliothek als Gruppenpflicht: verworfen, weil
+  Technologien und Datenformen unterschiedlich sind.
 
 ## Konsequenzen
 
-+ Ungültige Eingaben werden an einer Stelle abgewiesen, mit klarer Meldung.
-+ Die Geschäftslogik kann sich auf die Form ihrer Eingaben verlassen.
-- Für jede Route entsteht ein zusätzliches Schema.
-- Schema und Typ müssen zusammen gepflegt werden.
++ Ungültige oder manipulierte Daten werden kontrolliert erkannt, bevor sie
+  fachliche Seiteneffekte auslösen.
++ Prüfungen machen Eingabeannahmen explizit und vereinfachen die Verarbeitung
+  nachfolgender Komponenten.
+- Prüfregeln müssen gepflegt und bei fachlichen Änderungen angepasst werden.
+- Doppelte Validierung an mehreren Grenzen kann Aufwand erzeugen; jede Prüfung
+  soll einen klaren Zweck haben und relevante Sicherheitsgrenzen trotzdem
+  absichern.

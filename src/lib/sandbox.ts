@@ -12,12 +12,12 @@
 import { spawn } from "node:child_process";
 import { env } from "./env";
 import { authenticatedRepoUrl } from "./gitlab";
+import { updateReview } from "./store";
 import type { Review } from "./types";
 
 export interface SandboxOutcome {
   exitCode: number | null;
   timedOut: boolean;
-  log: string;
 }
 
 /**
@@ -28,6 +28,7 @@ export interface SandboxOutcome {
  */
 export function runSandbox(review: Review): Promise<SandboxOutcome> {
   const containerName = `adr-review-${review.id}`;
+  const startedAt = new Date().toISOString();
 
   // Alles Vertrauliche geht über die Umgebung, nicht über Argumente.
   const envPairs: Record<string, string> = {
@@ -89,16 +90,148 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    let log = "";
+    let pendingLine = "";
+    let phase = "starting";
+    let lastMessage = "Podman startet den Sandbox-Container.";
+    let percent = 3;
+    let currentRule: number | undefined;
+    let totalRules: number | undefined;
+    let persistChain = Promise.resolve();
+
+    const persist = () => {
+      const snapshot = { phase, lastMessage, currentRule, totalRules, percent };
+      persistChain = persistChain
+        .then(async () => {
+          await updateReview(review.id, (stored) => {
+            stored.sandboxProgress = {
+              phase: snapshot.phase,
+              message: snapshot.lastMessage,
+              percent: snapshot.percent,
+              currentRule: snapshot.currentRule,
+              totalRules: snapshot.totalRules,
+              updatedAt: new Date().toISOString(),
+            };
+            stored.sandboxHeartbeatAt = new Date().toISOString();
+          });
+        })
+        .catch(() => undefined);
+    };
+
+    const consumeLine = (line: string) => {
+      if (!line.trim()) return;
+      let progressChanged = false;
+      try {
+        const event = JSON.parse(line) as Record<string, unknown>;
+        const eventName = typeof event.event === "string" ? event.event : "";
+        const fields =
+          event.fields && typeof event.fields === "object"
+            ? (event.fields as Record<string, unknown>)
+            : event;
+        switch (eventName) {
+          case "run_start":
+            progressChanged = true;
+            phase = "running";
+            percent = 8;
+            lastMessage = "Review wird vorbereitet …";
+            break;
+          case "checkout_done":
+            progressChanged = true;
+            phase = "checkout";
+            percent = 18;
+            lastMessage = "Änderungen werden für die Prüfung vorbereitet …";
+            break;
+          case "rulebase_selected":
+            progressChanged = true;
+            phase = "rulebase";
+            percent = 25;
+            lastMessage = "Prüfkriterien werden geladen …";
+            break;
+          case "extraction_done":
+            progressChanged = true;
+            phase = "extraction";
+            percent = 35;
+            lastMessage = "Relevante Prüfkriterien werden ermittelt …";
+            break;
+          case "triage_done":
+            progressChanged = true;
+            phase = "triage";
+            percent = 40;
+            lastMessage = "Die Codeänderungen werden geprüft …";
+            break;
+          case "rule_start":
+            progressChanged = true;
+            phase = "judging";
+            currentRule =
+              typeof fields.index === "number" ? fields.index : undefined;
+            totalRules = typeof fields.of === "number" ? fields.of : undefined;
+            if (currentRule && totalRules) {
+              percent = Math.min(90, 40 + Math.floor((currentRule / totalRules) * 48));
+            }
+            lastMessage = totalRules
+              ? `Code wird geprüft (${currentRule ?? 1} von ${totalRules}) …`
+              : "Code wird geprüft …";
+            break;
+          case "rules_extracted":
+            progressChanged = true;
+            phase = "extraction";
+            lastMessage = "Prüfkriterien werden vorbereitet …";
+            break;
+          case "rule_judged":
+            progressChanged = true;
+            if (currentRule && totalRules) {
+              percent = Math.min(92, 40 + Math.floor((currentRule / totalRules) * 50));
+            }
+            lastMessage = "Code-Prüfung läuft …";
+            break;
+          case "callback_sent":
+            progressChanged = true;
+            phase = "callback";
+            percent = 98;
+            lastMessage = "Ergebnisse werden fertiggestellt …";
+            break;
+          case "run_summary":
+            progressChanged = true;
+            phase = "finishing";
+            percent = 95;
+            lastMessage = "Prüfung abgeschlossen; Ergebnisse werden gespeichert …";
+            break;
+          case "error":
+            progressChanged = true;
+            phase = "error";
+            percent = Math.min(percent, 90);
+            lastMessage = "Die Prüfung wird beendet. Ergebnisse werden geprüft …";
+            break;
+        }
+      } catch {
+        // Podman- und Git-Ausgaben sind für den Fortschritt nicht relevant.
+      }
+      if (progressChanged) persist();
+    };
+
     const capture = (chunk: Buffer) => {
-      log += chunk.toString();
-      // Das Containerprotokoll ist die Grundlage jeder späteren Fehlersuche,
-      // darf aber den Review-Datensatz nicht sprengen.
-      if (log.length > 512_000) log = log.slice(-512_000);
+      const text = chunk.toString();
+      pendingLine += text;
+      const lines = pendingLine.split("\n");
+      pendingLine = lines.pop() ?? "";
+      for (const line of lines) consumeLine(line);
     };
     child.stdout.on("data", capture);
     child.stderr.on("data", capture);
 
+    void updateReview(review.id, (stored) => {
+      stored.sandboxStartedAt = startedAt;
+      stored.sandboxContainerName = containerName;
+      stored.sandboxRuntime = env.sandboxRuntime;
+      stored.sandboxProcessId = child.pid;
+      stored.sandboxProgress = {
+        phase,
+        message: lastMessage,
+        percent,
+        updatedAt: startedAt,
+      };
+      stored.sandboxHeartbeatAt = startedAt;
+    }).catch(() => undefined);
+    const heartbeat = setInterval(() => persist(), 15_000);
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
@@ -112,12 +245,27 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
 
     child.on("error", (error) => {
       clearTimeout(timer);
-      resolve({ exitCode: null, timedOut, log: `${log}\n${error.message}` });
+      clearInterval(heartbeat);
+      phase = "error";
+      lastMessage = `Podman konnte nicht gestartet werden: ${error.message}`;
+      percent = 0;
+      persist();
+      void persistChain.then(() => resolve({ exitCode: null, timedOut }));
     });
 
     child.on("close", (code) => {
       clearTimeout(timer);
-      resolve({ exitCode: code, timedOut, log });
+      clearInterval(heartbeat);
+      if (pendingLine) consumeLine(pendingLine);
+      phase = timedOut ? "timeout" : code === 0 ? "exited" : "error";
+      percent = code === 0 && !timedOut ? 100 : Math.min(percent, 90);
+      lastMessage = timedOut
+        ? "Die Prüfung hat länger als erwartet gedauert und wurde beendet."
+        : code === 0
+          ? "Review abgeschlossen."
+          : "Die Prüfung wurde unerwartet beendet.";
+      persist();
+      void persistChain.then(() => resolve({ exitCode: code, timedOut }));
     });
   });
 }

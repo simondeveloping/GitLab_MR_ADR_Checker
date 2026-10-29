@@ -3,23 +3,20 @@
  *
  * Der Merge Request bleibt frei von Rauschen, weil dort nur Verstöße
  * erscheinen. Die Nachvollziehbarkeit bleibt trotzdem erhalten: Diese Seite
- * zeigt alle geprüften Regeln mit Begründung, Belegstelle und den
- * zugehörigen Werkzeugaufrufen, also auch die eingehaltenen und die
- * unentscheidbaren (NFA-3).
+ * zeigt die geprüften Regeln mit Begründung und Belegstelle.
  */
 
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ArrowUpRight } from "lucide-react";
 import { getReview } from "@/lib/store";
 import { ruleSource } from "@/lib/comment";
 import { findingsOf, verdictCounts, withVerdict } from "@/lib/findings";
-import type {
-  AgentFailure,
-  FeedbackEntry,
-  Finding,
-  Verdict,
-} from "@/lib/types";
-import FeedbackForm from "./FeedbackForm";
+import { loadFindingDiffs } from "@/lib/review-diff";
+import type { ReviewDiffHunk } from "@/lib/review-diff";
+import type { Finding, Verdict } from "@/lib/types";
+import { FindingFeedback } from "@/components/feedback/finding-feedback";
+import ReviewProgress from "./ReviewProgress";
 
 export const dynamic = "force-dynamic";
 
@@ -31,107 +28,101 @@ const VERDICT_LABEL: Record<Verdict, string> = {
 
 const VERDICT_ORDER: Verdict[] = ["NC", "CIA", "C"];
 
-/**
- * Anzeigenamen der Verarbeitungsstufen. Die Bezeichner im Datensatz bleiben
- * unverändert, damit ältere Läufe weiterhin lesbar sind; hier heißt der
- * Schritt, der nicht einschlägige Regeln aussortiert, "Vorfilter".
- */
-const STAGE_LABEL: Record<AgentFailure["stage"], string> = {
-  extract: "Extraktion",
-  triage: "Vorfilter",
-  locator: "Locator",
-  reader: "Reader",
-};
+function formatDuration(durationMs: number): string {
+  const totalSeconds = Math.round(durationMs / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes} min ${seconds}s`;
+}
 
 function FindingCard({
   finding,
+  diffHunks,
   reviewId,
-  feedback,
+  initialFeedback,
 }: {
   finding: Finding;
+  diffHunks: ReviewDiffHunk[];
   reviewId: string;
-  /** Bereits abgegebene Rückmeldung zu diesem Befund, falls vorhanden. */
-  feedback?: FeedbackEntry;
+  initialFeedback?: import("@/lib/types").FeedbackEntry;
 }) {
-  const emptyGreps = finding.trace.filter(
-    (t) => t.tool === "grep" && t.resultCount === 0,
-  ).length;
-
   return (
-    <div className="card" id={finding.id}>
+    <article className="finding-card" id={finding.id}>
       <div className="card-row">
-        <code>{ruleSource(finding)}</code>
+        <a className="finding-location" href={`#${finding.id}`}>
+          {finding.evidence[0] ? (
+            <code>
+              {finding.evidence[0].path}:{finding.evidence[0].startLine}
+              {finding.evidence[0].endLine !== finding.evidence[0].startLine
+                ? `-${finding.evidence[0].endLine}`
+                : ""}
+            </code>
+          ) : (
+            <code>{ruleSource(finding)}</code>
+          )}
+        </a>
         <span className={`badge badge-${finding.verdict}`}>
           {finding.verdict} · {VERDICT_LABEL[finding.verdict]}
         </span>
       </div>
 
-      <p className="rule-text">{finding.rule.text}</p>
-      <p>{finding.rationale}</p>
+      {diffHunks.map((hunk, hunkIndex) => (
+        <section className="code-review-hunk" key={`${hunk.newPath}:${hunk.header}:${hunkIndex}`}>
+          <div className="code-review-file">{hunk.newPath}</div>
+          <div className="code-review-hunk-header">{hunk.header}</div>
+          <div className="code-review-snippet">
+            {hunk.omittedLines ? (
+              <div className="code-review-omitted">
+                {hunk.omittedLines} weitere passende Zeilen ausgeblendet
+              </div>
+            ) : null}
+            {hunk.lines.map((line, lineIndex) => {
+              const marker =
+                line.kind === "added"
+                  ? "+"
+                  : line.kind === "removed"
+                    ? "−"
+                    : "";
 
-      {finding.evidence.length > 0 ? (
-        <ul className="meta">
-          {finding.evidence.map((evidence, index) => (
-            <li key={index}>
-              <code>
-                {evidence.path}:{evidence.startLine}-{evidence.endLine}
-              </code>
-              {evidence.why ? ` — ${evidence.why}` : null}
-            </li>
-          ))}
-        </ul>
+              return (
+                <div
+                  className={`code-review-line diff-${line.kind}`}
+                  key={`${line.oldLine ?? "-"}:${line.newLine ?? "-"}:${lineIndex}`}
+                >
+                  <span className="code-review-number">{line.oldLine ?? ""}</span>
+                  <span className="code-review-number">{line.newLine ?? ""}</span>
+                  <span className="code-review-marker">{marker}</span>
+                  <code>{line.text || " "}</code>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+      {diffHunks.length === 0 ? (
+        <p className="finding-no-diff">
+          Für diese Belegstelle wurde keine passende Zeile im MR-Diff gefunden.
+        </p>
       ) : null}
 
-      <div className="meta">
-        {finding.trace.length} Werkzeugaufrufe ({emptyGreps} Leersuchen) ·{" "}
-        {finding.modelCalls} Modellaufrufe
-        {finding.tokenUsage ? (
-          <> · {finding.tokenUsage.totalTokens.toLocaleString("de-DE")} Tokens</>
+      <div className="finding-description">
+        <p className="finding-rule">{finding.rule.text}</p>
+        <p className="finding-rationale">{finding.rationale}</p>
+
+        {finding.evidence.length > 0 ? (
+          <ul className="finding-evidence">
+            {finding.evidence.map((evidence, index) => (
+              <li key={index}>
+                {evidence.why ?? `Belegstelle in ${evidence.path}`}
+              </li>
+            ))}
+          </ul>
         ) : null}
       </div>
-
-      {finding.trace.length > 0 ? (
-        <details>
-          <summary>Werkzeugprotokoll</summary>
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Rolle</th>
-                <th>Werkzeug</th>
-                <th>Argumente</th>
-                <th>Treffer</th>
-                <th>ms</th>
-              </tr>
-            </thead>
-            <tbody>
-              {finding.trace.map((entry) => (
-                <tr key={entry.step}>
-                  <td>{entry.step}</td>
-                  <td>{entry.role}</td>
-                  <td>
-                    <code>{entry.tool}</code>
-                  </td>
-                  <td>
-                    <code>{JSON.stringify(entry.args)}</code>
-                  </td>
-                  <td>{entry.resultCount}</td>
-                  <td>{entry.durationMs}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </details>
-      ) : null}
-
-      {/* Bewertet wird der einzelne, belegte Befund und nicht der Review als
-          Ganzes (FA-15, Abschnitt 7.5). */}
-      <FeedbackForm
-        reviewId={reviewId}
-        findingId={finding.id}
-        existing={feedback}
-      />
-    </div>
+      <FindingFeedback reviewId={reviewId} findingId={finding.id} initialFeedback={initialFeedback} />
+    </article>
   );
 }
 
@@ -147,10 +138,15 @@ export default async function ReviewDetailPage({
   const result = review.result;
   const findings = findingsOf(review);
   const counts = verdictCounts(findings);
-  const feedbackByFinding = new Map(
-    (review.feedback ?? []).map((entry) => [entry.findingId, entry]),
-  );
-
+  let diffHunksByFinding = new Map<string, ReviewDiffHunk[]>();
+  if (result && findings.length > 0) {
+    try {
+      diffHunksByFinding = await loadFindingDiffs(review);
+    } catch {
+      // Ein temporärer GitLab-Fehler soll den gespeicherten Review-Bericht
+      // nicht unzugänglich machen.
+    }
+  }
   return (
     <>
       <p className="meta">
@@ -161,13 +157,29 @@ export default async function ReviewDetailPage({
         {review.mr.projectPath} !{review.mr.mrIid}
       </h1>
       <p className="subtitle">
-        {review.mr.title} · <a href={review.mr.webUrl}>Merge Request in GitLab</a>
+        <a href={review.mr.webUrl}>In GitLab öffnen ↗</a>
       </p>
+
+      <ReviewProgress
+        reviewId={review.id}
+        initial={{
+          status: review.status,
+          progress: review.sandboxProgress,
+        }}
+      />
 
       <div className="stats">
         <div>
           <span className="stat-label">Status</span>
-          <span className="stat-value">{review.status}</span>
+          <span className="stat-value">
+            {review.status === "completed"
+              ? "Abgeschlossen"
+              : review.status === "failed"
+                ? "Fehlgeschlagen"
+                : review.status === "running"
+                  ? "In Prüfung"
+                  : "Wartend"}
+          </span>
         </div>
         <div>
           <span className="stat-label">Regelbasis</span>
@@ -198,83 +210,17 @@ export default async function ReviewDetailPage({
         <div>
           <span className="stat-label">Laufzeit</span>
           <span className="stat-value">
-            {result ? `${Math.round(result.stats.durationMs / 1000)}s` : "—"}
-          </span>
-        </div>
-        <div>
-          <span className="stat-label">Modellaufrufe</span>
-          <span className="stat-value">{result?.stats.modelCalls ?? "—"}</span>
-        </div>
-        <div>
-          <span className="stat-label">Tokens gesamt</span>
-          <span className="stat-value">
-            {result?.stats.totalTokens?.toLocaleString("de-DE") ?? "—"}
-          </span>
-        </div>
-        <div>
-          <span className="stat-label">Tokens / Regel</span>
-          <span className="stat-value">
-            {result?.stats.averageTokensPerCheckedRule
-              ? Math.round(result.stats.averageTokensPerCheckedRule).toLocaleString("de-DE")
-              : "—"}
+            {result ? formatDuration(result.stats.durationMs) : "—"}
           </span>
         </div>
       </div>
 
-      {review.error ? (
-        <div className="card" style={{ borderColor: "var(--nc)" }}>
-          <strong>Der Lauf ist gescheitert.</strong>
-          <p>{review.error}</p>
-        </div>
-      ) : null}
-
       {result ? (
         <>
-          <h2>Regelbasis</h2>
-          <p className="meta">
-            {result.adrFiles.length} ADR-Datei(en):{" "}
-            {result.adrFiles.map((file) => (
-              <code key={file} style={{ marginRight: "0.5rem" }}>
-                {file}
-              </code>
-            ))}
-          </p>
-          <p className="meta">
-            {result.rules.length} Regeln extrahiert,{" "}
-            {result.droppedRules.length} davon vom Vorfilter als für diesen
-            Änderungssatz nicht einschlägig ausgeschlossen,{" "}
-            {findings.length} geprüft.
-          </p>
-
-          {result.adrTokenUsage && result.adrTokenUsage.length > 0 ? (
-            <details>
-              <summary>Tokenverbrauch je ADR-Extraktion</summary>
-              <table>
-                <thead>
-                  <tr>
-                    <th>ADR</th>
-                    <th>Regeln</th>
-                    <th>Prompt-Tokens</th>
-                    <th>Completion-Tokens</th>
-                    <th>Gesamt</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.adrTokenUsage.map((usage) => (
-                    <tr key={usage.adrFile}>
-                      <td>
-                        <code>{usage.adrFile}</code>
-                      </td>
-                      <td>{usage.extractedRules}</td>
-                      <td>{usage.promptTokens.toLocaleString("de-DE")}</td>
-                      <td>{usage.completionTokens.toLocaleString("de-DE")}</td>
-                      <td>{usage.totalTokens.toLocaleString("de-DE")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </details>
-          ) : null}
+          <div className="adr-source-link">
+            <span>{result.adrFiles.length} ADR{result.adrFiles.length === 1 ? "" : "s"} als Regelbasis</span>
+            {result.ruleOrigin === "group" ? <Link href="/group-adrs">Gruppen-ADRs ansehen <ArrowUpRight size={14} /></Link> : null}
+          </div>
 
           {VERDICT_ORDER.map((verdict) => {
             const group = withVerdict(findings, verdict);
@@ -288,87 +234,22 @@ export default async function ReviewDetailPage({
                 <summary className="section-toggle">
                   {VERDICT_LABEL[verdict]} ({group.length})
                 </summary>
-                {group.map((finding) => (
-                  <FindingCard
-                    key={finding.id}
-                    finding={finding}
-                    reviewId={review.id}
-                    feedback={feedbackByFinding.get(finding.id)}
-                  />
-                ))}
+            {group.map((finding) => (
+              <FindingCard
+                key={finding.id}
+                finding={finding}
+                diffHunks={diffHunksByFinding.get(finding.id) ?? []}
+                reviewId={review.id}
+                initialFeedback={review.feedback?.find((entry) => entry.findingId === finding.id)}
+              />
+            ))}
               </details>
             );
           })}
 
-          {result.droppedRules.length > 0 ? (
-            <>
-              <h2>Vom Vorfilter ausgeschlossen ({result.droppedRules.length})</h2>
-              <details>
-                <summary>Regeln ohne Bezug zu einer geänderten Datei</summary>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Regel</th>
-                      <th>Herkunft</th>
-                      <th>Grund</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.droppedRules.map((dropped) => (
-                      <tr key={dropped.rule.id}>
-                        <td>{dropped.rule.text}</td>
-                        <td>
-                          <code>{dropped.rule.adrFile}</code>
-                        </td>
-                        <td>{dropped.reason}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </details>
-            </>
-          ) : null}
-
-          {result.failures.length > 0 ? (
-            <>
-              <h2>Fehlschläge ({result.failures.length})</h2>
-              <p className="meta">
-                Nicht formatgerechte Modellantworten. Sie werden verworfen statt
-                als leeres Urteil gewertet (NFA-2).
-              </p>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Stufe</th>
-                    <th>Regel</th>
-                    <th>Meldung</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.failures.map((failure, index) => (
-                    <tr key={index}>
-                      <td>{STAGE_LABEL[failure.stage] ?? failure.stage}</td>
-                      <td>
-                        <code>{failure.ruleId ?? "—"}</code>
-                      </td>
-                      <td>{failure.message}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          ) : null}
         </>
-      ) : (
-        <p className="empty">Noch kein Ergebnis aus der Sandbox eingegangen.</p>
-      )}
-
-      {review.sandboxLog ? (
-        <details>
-          <summary>Containerprotokoll</summary>
-          <pre>{review.sandboxLog}</pre>
-        </details>
       ) : null}
+
     </>
   );
 }

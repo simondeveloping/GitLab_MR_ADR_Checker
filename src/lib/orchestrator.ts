@@ -28,8 +28,9 @@ import type { Review } from "./types";
 export async function createReview(
   projectId: number,
   mrIid: number,
+  repoUrl: string,
 ): Promise<Review> {
-  const mr = await loadMergeRequestContext(projectId, mrIid);
+  const mr = await loadMergeRequestContext(projectId, mrIid, repoUrl);
   const now = new Date().toISOString();
 
   const review: Review = {
@@ -58,6 +59,7 @@ export async function startReview(review: Review): Promise<void> {
       review.mr.projectId,
       review.mr.mrIid,
       renderPlaceholder(review.id, env.publicBaseUrl),
+      review.mr.repoUrl,
     );
 
     await updateReview(review.id, (r) => {
@@ -71,11 +73,13 @@ export async function startReview(review: Review): Promise<void> {
     return;
   }
 
-  const outcome = await runSandbox(review);
-
-  await updateReview(review.id, (r) => {
-    r.sandboxLog = outcome.log;
-  });
+  let outcome;
+  try {
+    outcome = await runSandbox(review);
+  } catch (error) {
+    await failReview(review.id, `Sandbox konnte nicht gestartet werden: ${String(error)}`);
+    return;
+  }
 
   // Der Regelfall ist, dass die Sandbox ihr Ergebnis selbst per Callback
   // gemeldet hat, bevor der Container endet. Ist das nicht geschehen, ist der
@@ -97,6 +101,7 @@ export async function removePlaceholder(review: Review): Promise<void> {
       review.mr.projectId,
       review.mr.mrIid,
       review.placeholderNoteId,
+      review.mr.repoUrl,
     );
     await updateReview(review.id, (r) => {
       r.placeholderNoteId = undefined;

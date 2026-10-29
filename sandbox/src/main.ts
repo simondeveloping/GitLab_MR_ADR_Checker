@@ -8,8 +8,8 @@
  *   3 Regelextraktion jedes ADR wird in für den MR relevante Regeln zerlegt
  *   4 Vorfilter       Regeln ohne Bezug zu einer geänderten Datei fallen heraus
  *
- * Für die Relevanz in Schritt 3 und 4 zählen nur die geänderten Dateien, die
- * nicht selbst zur Regelbasis gehören; siehe `relevantFiles` in `main`.
+ * ADR-Dateien dienen ausschließlich als Regelbasis. Sie werden aus dem
+ * Änderungssatz entfernt und nie als Prüfgegenstand oder Patch-Kontext genutzt.
  *   5 Prüfung        je Regel: Locator sucht, Reader liest und urteilt
  *   6 Befunde         je Regel ein Urteil mit Begründung und Belegstelle
  *
@@ -74,37 +74,30 @@ async function main(): Promise<void> {
   });
 
   // 1 Checkout
-  const { changedFiles, filteredFiles } = await checkout();
+  const { changedFiles, filteredFiles, excludedAdrFiles } = await checkout();
 
   // 2 Regelbasis
   const ruleBase = await loadRuleBase();
-  // Die ADR-Dateien selbst sind vom Suchraum ausgenommen, damit sich die zu
-  // prüfende Regel nicht als eigener Beleg wiederfindet (FA-5).
+  // ADR-Dateien sind Regelbasis, aber kein Prüfgegenstand oder Beleg.
   setExcludedAdrPaths(ruleBase.excludedPaths);
 
   const failures: AgentFailure[] = [];
 
-  // Die ADR-Dokumente sind die Regelbasis, nicht der Prüfgegenstand. Bringt ein
-  // Merge Request Regeln und Code zugleich ein, liegen sie mit im
-  // Änderungssatz - und dann lässt sich jede Regel über den Pfad ihres eigenen
-  // Dokuments für einschlägig halten. Extraktion und Vorfilter entscheiden auf
-  // dieser Grundlage mal so und mal so; gemessen schwankte allein daraus die
-  // Zahl der geprüften Regeln um mehr als das Doppelte. Für die Relevanz zählen
-  // deshalb nur die übrigen Pfade. Gemeldet wird weiterhin der vollständige
-  // Änderungssatz, und als Beleg sind die ADRs ohnehin ausgeschlossen (FA-5).
-  const excludedAdrPaths = new Set(ruleBase.excludedPaths);
-  const subjectFiles = changedFiles.filter((p) => !excludedAdrPaths.has(p));
-  // Ändert ein Merge Request ausschließlich ADRs, bliebe sonst kein Signal
-  // übrig; dann gilt wie bisher der gesamte Änderungssatz.
-  const relevantFiles = subjectFiles.length > 0 ? subjectFiles : changedFiles;
+  // ADR-Änderungen sind bereits beim Checkout ausgeschlossen. Ohne andere
+  // prüfrelevante Änderungen gibt es für diesen Lauf nichts zu beurteilen.
+  const relevantFiles = changedFiles;
   log.info("relevance_scope", {
-    changedFiles: changedFiles.length,
-    adrFilesInDiff: changedFiles.length - subjectFiles.length,
+    reviewableFiles: changedFiles.length,
+    adrFilesExcluded: excludedAdrFiles.length,
     relevantFiles: relevantFiles.length,
   });
 
-  // 3 Regelextraktion
-  const extraction = await extractRules(ruleBase.documents, relevantFiles);
+  // 3 Regelextraktion; bei ADR-only-/Noise-only-MRs wird kein Review
+  // gestartet und daher auch keine Regel-Extraktion benötigt.
+  const extraction =
+    relevantFiles.length > 0
+      ? await extractRules(ruleBase.documents, relevantFiles)
+      : { rules: [], failures: [], adrTokenUsage: [] };
   failures.push(...extraction.failures);
   log.info("extraction_done", {
     documents: ruleBase.documents.length,
@@ -126,7 +119,7 @@ async function main(): Promise<void> {
         of: triaged.selected.length,
         ruleId: rule.id,
       });
-      return judgeRule(rule, changedFiles);
+      return judgeRule(rule, relevantFiles);
     },
   );
   const findings: Finding[] = judged.map((outcome) => outcome.finding);

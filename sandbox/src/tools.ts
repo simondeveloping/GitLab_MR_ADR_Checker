@@ -73,6 +73,38 @@ function isExcluded(relPath: string): boolean {
   return relPath.split("/").some((segment) => SKIP_DIRS.has(segment));
 }
 
+/** Lädt einen kleinen Quelltextausschnitt für die Anzeige eines Befunds. */
+export async function loadEvidenceSnippet(
+  path: string,
+  startLine: number,
+  endLine: number,
+): Promise<{ startLine: number; lines: string[] } | undefined> {
+  try {
+    const absolute = await safeResolve(path);
+    const rel = toRelative(absolute);
+    if (isExcluded(rel)) return undefined;
+
+    const info = await stat(absolute);
+    if (!info.isFile() || info.size > MAX_FILE_BYTES) return undefined;
+
+    const sourceLines = (await readFile(absolute, "utf8")).split("\n");
+    const first = Math.max(1, Math.floor(startLine) - 2);
+    const last = Math.min(
+      sourceLines.length,
+      Math.max(Math.floor(endLine) + 2, first + 5),
+      first + 9,
+    );
+    if (first > sourceLines.length || last < first) return undefined;
+
+    return {
+      startLine: first,
+      lines: sourceLines.slice(first - 1, last).map((line) => line.slice(0, 500)),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Löst einen vom Modell gelieferten Pfad auf und stellt sicher, dass er
  * innerhalb des Projektbaums bleibt.

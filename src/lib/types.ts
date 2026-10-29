@@ -32,6 +32,10 @@ export interface Evidence {
   startLine: number;
   endLine: number;
   why?: string;
+  snippet?: {
+    startLine: number;
+    lines: string[];
+  };
 }
 
 /** Ein protokollierter Werkzeugaufruf (NFA-3). */
@@ -177,4 +181,17 @@ export interface Review {
   feedback: FeedbackEntry[];
   error?: string;
   sandboxLog?: string;
+  sandboxProgress?: {
+    phase: string;
+    message: string;
+    percent: number;
+    updatedAt: string;
+    currentRule?: number;
+    totalRules?: number;
+  };
+  sandboxStartedAt?: string;
+  sandboxHeartbeatAt?: string;
+  sandboxContainerName?: string;
+  sandboxRuntime?: string;
+  sandboxProcessId?: number;
 }

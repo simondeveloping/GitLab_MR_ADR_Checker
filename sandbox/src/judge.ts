@@ -42,6 +42,7 @@ import {
   LOCATOR_TOOLS,
   READER_TOOLS,
   dispatch,
+  loadEvidenceSnippet,
   type ToolContext,
 } from "./tools.js";
 import { log, withUsageScope } from "./trace.js";
@@ -483,6 +484,16 @@ async function judgeRuleInner(
         trace,
         budgetExhausted,
       };
+
+  await Promise.all(
+    finding.evidence.map(async (evidence) => {
+      evidence.snippet = await loadEvidenceSnippet(
+        evidence.path,
+        evidence.startLine,
+        evidence.endLine,
+      );
+    }),
+  );
 
   const emptyGreps = trace.filter(
     (t) => t.tool === "grep" && t.resultCount === 0,

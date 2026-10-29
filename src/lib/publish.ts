@@ -64,8 +64,9 @@ function collectNewLines(diffText: string): Set<number> {
 async function loadDiffTargets(
   projectId: number,
   mrIid: number,
+  repoUrl: string,
 ): Promise<Map<string, DiffTarget>> {
-  const diffs = await listMergeRequestDiffs(projectId, mrIid);
+  const diffs = await listMergeRequestDiffs(projectId, mrIid, repoUrl);
 
   const targets = new Map<string, DiffTarget>();
   for (const diff of diffs) {
@@ -125,11 +126,16 @@ export async function publishFindings(review: Review): Promise<PublishResult> {
       review.mr.projectId,
       review.mr.mrIid,
       renderSummary(review, baseUrl),
+      review.mr.repoUrl,
     );
     return { published: [], reported: 0, summaryDiscussionId };
   }
 
-  const targets = await loadDiffTargets(review.mr.projectId, review.mr.mrIid);
+  const targets = await loadDiffTargets(
+    review.mr.projectId,
+    review.mr.mrIid,
+    review.mr.repoUrl,
+  );
   const published: NonNullable<Review["publishedComments"]> = [];
 
   for (const [, findings] of groupByAdr(violations)) {
@@ -153,6 +159,7 @@ export async function publishFindings(review: Review): Promise<PublishResult> {
             oldPath: position.target.oldPath,
             newLine: position.line,
           },
+          review.mr.repoUrl,
         );
 
         if (discussionId) {
@@ -170,6 +177,7 @@ export async function publishFindings(review: Review): Promise<PublishResult> {
         review.mr.projectId,
         review.mr.mrIid,
         body,
+        review.mr.repoUrl,
       );
       for (const f of findings) {
         published.push({ findingId: f.id, kind: "fallback", discussionId });
@@ -182,6 +190,7 @@ export async function publishFindings(review: Review): Promise<PublishResult> {
     review.mr.projectId,
     review.mr.mrIid,
     renderSummary(review, baseUrl),
+    review.mr.repoUrl,
   );
 
   return { published, reported: violations.length, summaryDiscussionId };

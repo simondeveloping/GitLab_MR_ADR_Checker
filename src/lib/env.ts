@@ -17,13 +17,130 @@ function optionalNumber(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+export interface GitLabConnection {
+  host: string;
+  token: string;
+  projects?: string[];
+}
+
+function configuredGitLabConnections(): GitLabConnection[] {
+  const raw = process.env.GITLAB_CONNECTIONS;
+  if (!raw) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("GITLAB_CONNECTIONS muss gültiges JSON sein.");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("GITLAB_CONNECTIONS muss ein JSON-Array sein.");
+  }
+
+  return parsed.map((value, index) => {
+    if (!value || typeof value !== "object") {
+      throw new Error(`GITLAB_CONNECTIONS[${index}] ist ungültig.`);
+    }
+    const item = value as Record<string, unknown>;
+    if (typeof item.host !== "string" || typeof item.token !== "string") {
+      throw new Error(
+        `GITLAB_CONNECTIONS[${index}] benötigt die Felder host und token.`,
+      );
+    }
+    if (
+      item.projects !== undefined &&
+      (!Array.isArray(item.projects) ||
+        item.projects.some((project) => typeof project !== "string"))
+    ) {
+      throw new Error(
+        `GITLAB_CONNECTIONS[${index}].projects muss ein Array aus Projektpfaden sein.`,
+      );
+    }
+    return {
+      host: item.host.replace(/\/+$/, ""),
+      token: item.token,
+      projects: item.projects as string[] | undefined,
+    };
+  });
+}
+
+function projectKey(value: string): string {
+  const url = new URL(value);
+  return `${url.origin}${url.pathname.replace(/\/+$/, "").replace(/\.git$/i, "")}`;
+}
+
+/** Wählt die GitLab-Verbindung anhand der URL des betroffenen Repositorys. */
+export function gitLabCredentials(repoUrl: string): GitLabConnection {
+  const repoKey = projectKey(repoUrl);
+  const repo = new URL(repoUrl);
+  const connections = configuredGitLabConnections();
+  const matchingProjects = connections.filter((connection) =>
+    connection.projects?.some((project) => {
+      if (/^https?:\/\//i.test(project)) return projectKey(project) === repoKey;
+      const configuredHost = new URL(connection.host);
+      const hostPath = configuredHost.pathname.replace(/\/$/, "");
+      if (
+        configuredHost.origin !== repo.origin ||
+        (hostPath &&
+          repo.pathname !== hostPath &&
+          !repo.pathname.startsWith(`${hostPath}/`))
+      ) {
+        return false;
+      }
+      const projectPath = project
+        .replace(/^\/+|\/+$/g, "")
+        .replace(/\.git$/i, "");
+      const repositoryPath = repo.pathname
+        .slice(hostPath.length)
+        .replace(/^\/+|\/+$/g, "")
+        .replace(/\.git$/i, "");
+      return repositoryPath === projectPath;
+    }),
+  );
+  if (matchingProjects.length === 1) return matchingProjects[0];
+  if (matchingProjects.length > 1) {
+    throw new Error(`Mehrere GitLab-Verbindungen passen zu ${repoUrl}.`);
+  }
+
+  const matchingHosts = connections.filter((connection) => {
+    if (connection.projects?.length) return false;
+    const configuredHost = new URL(connection.host);
+    const hostPath = configuredHost.pathname.replace(/\/$/, "");
+    return (
+      configuredHost.origin === repo.origin &&
+      (!hostPath ||
+        repo.pathname === hostPath ||
+        repo.pathname.startsWith(`${hostPath}/`))
+    );
+  });
+  if (matchingHosts.length === 1) return matchingHosts[0];
+  if (matchingHosts.length > 1) {
+    throw new Error(`Mehrere GitLab-Verbindungen passen zu ${repoUrl}.`);
+  }
+  if (connections.length > 0) {
+    throw new Error(`Keine GitLab-Verbindung für Repository ${repoUrl} konfiguriert.`);
+  }
+
+  // Rückwärtskompatibilität zur bisherigen Einzel-Instanz-Konfiguration.
+  const legacyHost = process.env.GITLAB_HOST?.replace(/\/+$/, "");
+  const legacyToken = process.env.GITLAB_TOKEN;
+  if (legacyHost && legacyToken) {
+    const configuredHost = new URL(legacyHost);
+    const hostPath = configuredHost.pathname.replace(/\/$/, "");
+    if (
+      configuredHost.origin === repo.origin &&
+      (!hostPath ||
+        repo.pathname === hostPath ||
+        repo.pathname.startsWith(`${hostPath}/`))
+    ) {
+      return { host: legacyHost, token: legacyToken };
+    }
+  }
+
+  throw new Error(`Keine GitLab-Verbindung für Repository ${repoUrl} konfiguriert.`);
+}
+
 export const env = {
-  get gitlabHost() {
-    return required("GITLAB_HOST").replace(/\/+$/, "");
-  },
-  get gitlabToken() {
-    return required("GITLAB_TOKEN");
-  },
   get webhookSecret() {
     return required("GITLAB_WEBHOOK_SECRET");
   },

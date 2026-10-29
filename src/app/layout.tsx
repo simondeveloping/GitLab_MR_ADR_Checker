@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next";
+import { AppShell } from "@/components/app-shell";
+import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -7,9 +9,8 @@ export const metadata: Metadata = {
     "Architekturkonformitäts-Review für GitLab Merge Requests auf Basis von Architecture Decision Records",
 };
 
-/** Die Oberfläche ist fest hell; der Browser soll nichts dunkel einfärben. */
 export const viewport: Viewport = {
-  colorScheme: "light",
+  colorScheme: "light dark",
   themeColor: "#ffffff",
 };
 
@@ -21,7 +22,7 @@ export default function RootLayout({
   return (
     <html lang="de">
       <body>
-        <main>{children}</main>
+        <ThemeProvider><AppShell>{children}</AppShell></ThemeProvider>
       </body>
     </html>
   );

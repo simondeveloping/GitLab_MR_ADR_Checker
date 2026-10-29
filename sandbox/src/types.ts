@@ -23,6 +23,10 @@ export interface Evidence {
   startLine: number;
   endLine: number;
   why?: string;
+  snippet?: {
+    startLine: number;
+    lines: string[];
+  };
 }
 
 export interface ToolCallTrace {

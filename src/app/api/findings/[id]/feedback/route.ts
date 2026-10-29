@@ -9,10 +9,9 @@
  * Entwickelnden erzeugen, weshalb die Bewertung an der einzelnen, belegten
  * Fundstelle ansetzt.
  *
- * Den Regelfall bedient der POST-Zweig: das Formular an der Befundkarte der
- * Detailseite. Der GET-Zweig nimmt dieselbe Bewertung über einen einfachen
- * Link entgegen und leitet danach auf den bewerteten Befund zurück; damit
- * bleibt die Rückmeldung auch ohne JavaScript erreichbar.
+ * GET nimmt die Bewertung über ein natives HTML-Formular entgegen und leitet
+ * zurück zum bewerteten Befund; so funktioniert die Rückmeldung auch ohne
+ * clientseitiges JavaScript.
  */
 
 import { NextResponse } from "next/server";
@@ -40,7 +39,7 @@ async function record(
 
   await updateReview(reviewId, (r) => {
     // Eine Person darf ihre Meinung ändern; der letzte Eintrag je Befund gilt.
-    r.feedback = r.feedback.filter((entry) => entry.findingId !== findingId);
+    r.feedback = (r.feedback ?? []).filter((entry) => entry.findingId !== findingId);
     r.feedback.push({
       findingId,
       rating,

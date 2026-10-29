@@ -2,8 +2,9 @@
  * Schritt 1 der Pipeline: Checkout und Änderungssatz (Abschnitt 7.2.1).
  *
  * Der Container klont das Repository auf den Stand des Merge Requests, erzeugt
- * den Diff gegen den Zielbranch und filtert dabei Rauschen heraus, das für
- * eine Architekturaussage nichts beiträgt, aber Kontext verbraucht (FA-13).
+ * den Diff gegen den Zielbranch und filtert dabei ADR-Dokumente sowie Rauschen
+ * heraus, das für eine Architekturaussage nichts beiträgt, aber Kontext
+ * verbraucht (FA-13).
  *
  * Der gefilterte Änderungssatz wird nicht als Text an den Modellaufruf
  * übergeben, sondern physisch als Datei `mr_diff.patch` im geklonten
@@ -62,16 +63,23 @@ async function git(args: string[], cwd?: string): Promise<string> {
 }
 
 export interface CheckoutResult {
-  /** Pfade des gefilterten Änderungssatzes, relativ zur Repository-Wurzel. */
+  /** Prüfrelevante Pfade ohne ADRs und Rauschen, relativ zur Repository-Wurzel. */
   changedFiles: string[];
   /** Pfade, die der Rauschfilter entfernt hat. */
   filteredFiles: string[];
+  /** ADR-Pfade, die nicht Teil des Code-Reviews sind. */
+  excludedAdrFiles: string[];
   /** Merge-Base gegen den Zielbranch. */
   baseSha: string;
 }
 
+function isProjectAdr(path: string): boolean {
+  const adrDir = config.projectAdrDir.replace(/^\.\//, "").replace(/\/$/, "");
+  return Boolean(adrDir) && path.startsWith(`${adrDir}/`);
+}
+
 /**
- * Klont das Repository und legt den gefilterten Diff als Patch-Datei ab.
+ * Klont das Repository und legt den Code-Review-Diff ohne ADRs als Patch-Datei ab.
  */
 export async function checkout(): Promise<CheckoutResult> {
   // Voller Klon statt `--depth 1`: Der Agent beurteilt die Regel am Zustand
@@ -109,8 +117,11 @@ export async function checkout(): Promise<CheckoutResult> {
     .map((line) => line.trim())
     .filter(Boolean);
 
-  const changedFiles = allChanged.filter((path) => !isNoise(path));
+  const changedFiles = allChanged.filter(
+    (path) => !isNoise(path) && !isProjectAdr(path),
+  );
   const filteredFiles = allChanged.filter((path) => isNoise(path));
+  const excludedAdrFiles = allChanged.filter(isProjectAdr);
 
   // Der Patch wird nur über die verbliebenen Pfade erzeugt. `--` trennt
   // Optionen von Pfaden, damit ein Dateiname mit führendem Bindestrich nicht
@@ -137,6 +148,9 @@ export async function checkout(): Promise<CheckoutResult> {
     (filteredFiles.length > 0
       ? `# Als Rauschen herausgefiltert (${filteredFiles.length}): ${filteredFiles.join(", ")}\n`
       : "") +
+    (excludedAdrFiles.length > 0
+      ? `# Als ADR-Regelbasis ausgeschlossen (${excludedAdrFiles.length}): ${excludedAdrFiles.join(", ")}\n`
+      : "") +
     `\n`;
 
   await writeFile(join(config.repoDir, config.patchFile), header + patch, "utf8");
@@ -144,9 +158,10 @@ export async function checkout(): Promise<CheckoutResult> {
   log.info("checkout_done", {
     changed: changedFiles.length,
     filtered: filteredFiles.length,
+    excludedAdr: excludedAdrFiles.length,
     baseSha,
     patchBytes: patch.length,
   });
 
-  return { changedFiles, filteredFiles, baseSha };
+  return { changedFiles, filteredFiles, excludedAdrFiles, baseSha };
 }

@@ -24,7 +24,12 @@ export const dynamic = "force-dynamic";
 interface MergeRequestEvent {
   object_kind?: string;
   event_type?: string;
-  project?: { id?: number };
+  project?: {
+    id?: number;
+    git_http_url?: string;
+    http_url?: string;
+    web_url?: string;
+  };
   object_attributes?: {
     iid?: number;
     action?: string;
@@ -74,11 +79,15 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const projectId = event.project?.id;
   const mrIid = event.object_attributes?.iid;
-  if (!projectId || !mrIid) {
+  const repoUrl =
+    event.project?.git_http_url ??
+    event.project?.http_url ??
+    (event.project?.web_url ? `${event.project.web_url}.git` : undefined);
+  if (!projectId || !mrIid || !repoUrl) {
     return NextResponse.json({ error: "incomplete payload" }, { status: 400 });
   }
 
-  const review = await createReview(projectId, mrIid);
+  const review = await createReview(projectId, mrIid, repoUrl);
 
   // Bewusst ohne await: GitLab erwartet eine schnelle Quittung, der Prüflauf
   // dauert Minuten.

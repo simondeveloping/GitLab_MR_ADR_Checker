@@ -58,9 +58,16 @@ export async function triage(
     return { selected: [], dropped: [], failures: [] };
   }
 
-  // Ohne Änderungssatz gibt es nichts zu routen; dann wird alles geprüft.
+  // Ohne geänderte prüfrelevante Dateien gibt es nichts zu prüfen.
   if (changedFiles.length === 0) {
-    return { selected: rules, dropped: [], failures: [] };
+    return {
+      selected: [],
+      dropped: rules.map((rule) => ({
+        rule,
+        reason: "Keine geänderten prüfrelevanten Dateien.",
+      })),
+      failures: [],
+    };
   }
 
   const ruleList = rules
