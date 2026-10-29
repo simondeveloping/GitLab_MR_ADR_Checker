@@ -1,116 +1,152 @@
-# ADR-Review — Proof-of-Concept zu Kapitel 7
+# ADR-Review-Agent für GitLab Merge Requests
 
-Umsetzung des in Kapitel 7 der Bachelorarbeit beschriebenen Prototyps: ein
-Review-Agent, der am GitLab Merge Request ansetzt, das Architekturwissen des
-Projekts (Architecture Decision Records) als Prüfgrundlage heranzieht und seine
-Befunde dorthin zurückmeldet, wo die Entwickelnden ohnehin arbeiten.
+Dieses Repository enthält den lauffähigen Prototypen aus Kapitel 7 der
+Bachelorarbeit. Der Agent prüft neu geöffnete GitLab Merge Requests anhand der
+Architecture Decision Records (ADRs) des Projekts und meldet
+nachvollziehbare Befunde zurück in den Merge Request.
 
-Der Ablauf verteilt sich auf drei Orte, die klar getrennt bleiben:
+Das System ist ein Forschungsprototyp und kein allgemeines statisches
+Analysetool: Ein OpenAI-kompatibles Sprachmodell extrahiert und bewertet Regeln.
+Jedes Urteil wird mit Begründung, Belegstellen und Werkzeugprotokoll gespeichert.
 
-```
-GitLab            Backend (Next.js)              Sandbox (Podman)
-──────            ─────────────────              ────────────────
-MR geöffnet   ──► Webhook prüft Secret,      ──► 1 Checkout: klonen, Diff als
-                    filtert Ereignistyp             mr_diff.patch, Rauschen filtern
-                                                2 Regelbasis: docs/adr/, sonst
-                                                     Gruppenstandard
-                                                 3 MR-bezogene Regelextraktion je ADR
-                                                4 Triage auf Dateipfaden
-                                                5 Prüfung je Regel:
-                                                    Locator sucht, Reader urteilt
-                                                6 Befunde
-Inline-       ◄── Aggregation: nach ADR       ◄── Callback mit allen Befunden;
-Diskussion         gruppieren, Kommentar-          danach wird die Sandbox
-(nur bei NC)       text erzeugen                   gelöscht
-```
+## Was das Projekt macht
 
-## Aufbau
+Der Review-Ablauf besteht aus drei Komponenten:
 
-| Pfad | Inhalt | Abschnitt |
-| --- | --- | --- |
-| `src/app/api/gitlab/webhook/` | Auslösung: Secret-Prüfung, Ereignisfilter | 7.2.1 |
-| `src/lib/sandbox.ts` | Start und Abbau des ephemeren Containers | 7.2.1 |
-| `src/app/api/reviews/[id]/callback/` | Rückweg aus der Sandbox | 7.2.5 |
-| `src/lib/comment.ts`, `src/lib/publish.ts` | Kommentartext, Inline-Positionierung | 7.3 |
-| `src/app/api/findings/[id]/feedback/` | Rückmeldung am Einzelbefund | 7.5 |
-| `src/app/reviews/[id]/` | Detailseite mit allen Regeln und Werkzeugaufrufen | 7.3 |
-| `sandbox/src/checkout.ts` | Klon, Diff, Rauschfilter | 7.2.1 |
-| `sandbox/src/rulebase.ts` | Zweistufiger Rückfall auf den Gruppenstandard | 7.2.2 |
-| `sandbox/src/extract.ts` | Zerlegung eines ADR in atomare Regeln | 7.2.2 |
-| `sandbox/src/triage.ts` | Vorauswahl der einschlägigen Regeln | 7.2.3 |
-| `sandbox/src/judge.ts` | Locator/Reader mit Werkzeugbudget | 7.2.4 |
-| `sandbox/src/tools.ts` | `list_files`, `grep`, `read_file` | 7.2.4 |
-| `sandbox/standards/` | Organisationsweite Regelbasis | 7.2.2 |
+1. **GitLab** sendet bei einem neu geöffneten Merge Request ein Webhook-Ereignis.
+2. **Next.js-Backend** prüft das Webhook-Secret, lädt Merge-Request-Metadaten,
+   legt einen Review-Datensatz an und startet die Sandbox im Hintergrund.
+3. **Podman-Sandbox** klont den betroffenen Commit, erstellt den Diff und führt
+   die ADR-basierte Analyse in einem kurzlebigen Container aus. Das Ergebnis
+   geht per authentifiziertem Callback zurück an das Backend; anschließend wird
+   der Container entfernt.
 
-## Inbetriebnahme
+Die Prüfung läuft in diesen Schritten:
+
+1. Als Regelbasis werden ADRs aus `docs/adr/` verwendet. Fehlen dort passende
+   ADRs, greift der mitgelieferte Gruppenstandard aus `sandbox/standards/`.
+2. Aus den ADRs werden einzelne, prüfbare Regeln extrahiert.
+3. Eine Triage wählt Regeln aus, die für die geänderten Dateipfade relevant
+   erscheinen.
+4. Für jede ausgewählte Regel sucht ein **Locator** nach Evidenz; ein **Reader**
+   bewertet die gefundene Stelle. Die Urteile lauten `C` (eingehalten), `NC`
+   (nicht konform/verletzt) oder `CIA` (nicht entscheidbar).
+5. `NC`-Befunde werden nach ADR gruppiert und, sofern möglich, als Inline-
+   Diskussion an geänderten Zeilen veröffentlicht. Andere Befunde sowie
+   Werkzeugprotokolle und Laufdetails sind auf der Review-Seite des Backends
+   einsehbar. Ein Sammelkommentar im Merge Request verlinkt auf diese Seite.
+
+Der Webhook antwortet mit HTTP `202`, ohne auf den mehrminütigen Prüflauf zu
+warten. Dadurch blockiert der Review keine CI/CD-Pipeline. Ausgelöst werden nur
+neu geöffnete Merge Requests (`action: open`); Entwürfe und andere Aktionen
+werden ignoriert.
+
+## Voraussetzungen
+
+- Node.js **20.9 oder neuer** (empfohlen: Node.js 22) und npm
+- Podman für den Sandbox-Container
+- Zugriff auf eine GitLab-Instanz und ein GitLab-Token mit Leserechten auf die
+  Projekte sowie Rechten zum Erstellen und Löschen von Merge-Request-Notizen und
+  Diskussionen
+- ein OpenAI-kompatibles LLM-Gateway und ein dort verfügbares Modell
+- Netzwerkzugriff des Backends auf GitLab und das LLM-Gateway; Netzwerkzugriff
+  des Containers auf GitLab, das LLM-Gateway und die Callback-URL des Backends
+
+## Lokal starten
+
+Im Projektverzeichnis:
 
 ```bash
-npm install
-cp .env.example .env.local   # Werte eintragen
-npm run sandbox:build        # Container-Image der Prüfumgebung
-npm run build && npm start
+npm ci
+cp .env.example .env.local
 ```
 
-In GitLab unter *Settings → Webhooks* anlegen:
+Öffne `.env.local` und trage mindestens folgende Werte ein:
 
-- URL: `https://<backend>/api/gitlab/webhook`
-- Secret Token: derselbe Wert wie `GITLAB_WEBHOOK_SECRET`
-- Trigger: *Merge request events*. Das Backend startet nur bei neu geöffneten
-  Merge Requests (`action: open`); Updates, Reopens, Close- und Merge-Events
-  werden ignoriert.
+| Variable | Bedeutung |
+| --- | --- |
+| `GITLAB_HOST` | Basis-URL der GitLab-Instanz, z. B. `https://gitlab.example.com` |
+| `GITLAB_TOKEN` | GitLab-Zugriffstoken für Projekte und Merge Requests |
+| `GITLAB_WEBHOOK_SECRET` | Geheimnis zur Prüfung eingehender GitLab-Webhooks |
+| `LLM_BASE_URL` | Basis-URL des OpenAI-kompatiblen Modell-Gateways, inklusive `/v1` falls erforderlich |
+| `LLM_API_KEY` | API-Schlüssel für das Modell-Gateway |
+| `LLM_MODEL` | Modellname, den das Gateway erwartet |
+| `PUBLIC_BASE_URL` | Im Browser erreichbare Backend-URL für Links in Kommentaren |
+| `CALLBACK_BASE_URL` | Vom Container erreichbare Backend-URL für Ergebnis-Callbacks |
 
-Der Webhook quittiert sofort mit `202`; der Prüflauf dauert Minuten und
-blockiert die CI/CD-Pipeline nicht (FA-12).
+Die Standardwerte für `PUBLIC_BASE_URL` und `CALLBACK_BASE_URL` passen für
+typische lokale Podman-Setups. Bei einem anderen Host, Port oder Container-
+Netzwerk müssen sie angepasst werden. Weitere optionale Laufzeit-, Budget- und
+Parallelitätsparameter sind in `.env.example` dokumentiert.
 
-## Gemessene Festlegungen
+Baue anschließend das Prüf-Image und starte den Entwicklungsserver:
 
-Die wesentlichen Entscheidungen dieses Prototyps sind nicht gesetzt, sondern
-gemessen. Wer sie ändert, ändert Verhalten, das in Kapitel 6 belegt ist:
+```bash
+npm run sandbox:build
+npm run dev
+```
 
-- **Werkzeugbudget** (`BUDGET_*`, Vorgabe 8 / 5 / 2). Der Knick der
-  Sättigungskurve aus Abschnitt 6.6.4. Ein zu kleines Budget lässt den Vorteil
-  des Werkzeugzugriffs auf 2,4 Punkte zusammenschrumpfen; ein zu großes kostet
-  Laufzeit ohne Gegenwert. Die Ausschöpfung gilt als Unsicherheitssignal, nicht
-  als Anlass weiterzusuchen — falsche Urteile gingen mit *mehr* Werkzeugnutzung
-  einher als richtige (Abschnitt 6.6.2).
-- **ADR-Statusfilter.** Nur ADRs mit Status `accepted`, `angenommen`,
-  `akzeptiert`, `approved` oder `beschlossen` werden als Regelbasis geladen.
-  Deprecated, superseded oder statuslose Dokumente werden protokolliert und
-  nicht extrahiert.
-- **Begrenzte Parallelität** (`EXTRACTION_CONCURRENCY`, `JUDGING_CONCURRENCY`,
-  Vorgabe 3 / 3). ADR-Extraktion und Regelprüfungen sind unabhängige
-  Modellaufgaben und laufen deshalb parallel. Die Grenze verhindert, dass das
-  Modellgateway durch einen Merge Request mit Requests überflutet wird; bei
-  429-Antworten sollte der Wert gesenkt werden.
-- **Nur `NC` erzeugt einen Kommentar** (`src/lib/publish.ts`). „Der Code
-  widerspricht der Regel" und „es wurde nichts gefunden" sind zwei verschiedene
-  Sachverhalte. Sie zusammenzufassen erklärt allein 46 % des in Abschnitt 6.5
-  gemessenen Verfahrensunterschieds und erzeugt genau den Fehlalarm, an dem
-  statische Analysewerkzeuge ihre Akzeptanz verlieren.
-- **Suchraum ohne Sprachfilter** (`sandbox/src/tools.ts`). 60 % der als
-  unentscheidbar eingestuften Fälle sind Artefakte einer Whitelist, die nur
-  Programmiersprachen erfasst (Abschnitt 6.2.2). CI-, Build- und
-  Konfigurationsdateien bleiben deshalb im Suchraum; ausgeschlossen sind nur die
-  ADR-Dateien selbst (FA-5).
-- **Trennung von Locator und Reader** (`sandbox/src/judge.ts`). Übernommen aus
-  dem in Kapitel 6 vermessenen Aufbau, unverändert. Sie hält die
-  Werkzeugprotokolle auswertbar: Aus ihnen lässt sich ablesen, ob eine Suche
-  erfolglos blieb oder ob gefundene Evidenz nicht gelesen wurde.
-- **Rückmeldung am Einzelbefund, nicht am Review** (`src/app/api/findings/`).
-  Wer ein fremdes Urteil samt Begründung vorgelegt bekommt, verankert sich daran
-  statt unabhängig zu prüfen (Abschnitt 6.1.1, Anhang A.7).
+Die Weboberfläche ist standardmäßig unter <http://localhost:3000> erreichbar.
+Ein Produktionsstart ist mit `npm run build` und anschließend `npm start`
+möglich.
 
-## Bewusst nicht umgesetzt
+## GitLab-Webhook einrichten
 
-Entsprechend Abschnitt 4.1.4 und 7.4:
+Damit GitLab das lokale Backend erreichen kann, muss es unter einer von GitLab
+erreichbaren URL laufen. Für lokale Entwicklung kann dafür ein geeigneter
+Tunnel oder eine Entwicklungsumgebung verwendet werden. Trage diese URL als
+`PUBLIC_BASE_URL` ein. Die URL in `CALLBACK_BASE_URL` muss dagegen aus dem
+Sandbox-Container erreichbar sein.
 
-- **Rückführung des Feedbacks.** Bewertungen werden gespeichert, aber nicht in
-  den Prüfvorgang zurückgeführt.
-- **Priorisierung nach Schweregrad** und **sprachspezifische Analyse.**
-- **Automatisierte Testabdeckung.** Die Absicherung erfolgte empirisch über die
-  Auswertung ganzer Läufe gegen eine Referenz.
+Lege im GitLab-Projekt unter **Settings → Webhooks** einen Webhook an:
 
-Bekannte Schwäche der Triage: Sie entscheidet allein auf Dateipfaden, sodass
-eine Regel verlorengehen kann, deren Verletzung sich in einer dem Namen nach
-unverdächtigen Datei zeigt. Der Fehler wirkt in Richtung des Übersehens und
-nicht in Richtung des Fehlalarms (Abschnitt 7.2.3).
+- **URL:** `<PUBLIC_BASE_URL>/api/gitlab/webhook`
+- **Secret token:** derselbe Wert wie `GITLAB_WEBHOOK_SECRET`
+- **Trigger:** *Merge request events*
+
+Beim Öffnen eines geeigneten Merge Requests sollte im Backend ein Lauf unter
+`/reviews/<review-id>` erscheinen. Die Übersichtsseite listet die Reviews,
+die Detailseite zeigt Status, Regelbasis, Urteile, Belegstellen, Werkzeugaufrufe,
+Tokenverbrauch und gegebenenfalls den Sandbox-Log.
+
+## Entwicklung und Prüfungen
+
+```bash
+npm run lint
+npm run typecheck
+npm run build
+npm --prefix sandbox ci
+npm --prefix sandbox run build
+```
+
+Das Sandbox-Image wird mit `npm run sandbox:build` gebaut. Es enthält den
+separaten TypeScript-Prüfkern aus `sandbox/src/` sowie die Gruppenstandards aus
+`sandbox/standards/`.
+
+## Projektstruktur
+
+| Pfad | Zweck |
+| --- | --- |
+| `src/app/api/gitlab/webhook/` | Webhook-Authentifizierung und Auslösung neuer Reviews |
+| `src/lib/orchestrator.ts` | Lebenszyklus eines Reviews im Backend |
+| `src/lib/sandbox.ts` | Start und Überwachung des Podman-Containers |
+| `src/app/api/reviews/[id]/callback/` | Authentifizierter Rückweg der Prüfergebnisse |
+| `src/lib/publish.ts`, `src/lib/comment.ts` | Befunde formatieren und in GitLab veröffentlichen |
+| `src/app/` | Übersichts- und Detailseiten sowie Feedback-Formular |
+| `sandbox/src/checkout.ts` | Repository auschecken und Änderungssatz vorbereiten |
+| `sandbox/src/rulebase.ts` | Projekt-ADRs und Rückfall auf den Gruppenstandard laden |
+| `sandbox/src/extract.ts`, `sandbox/src/triage.ts` | Regeln extrahieren und vorfiltern |
+| `sandbox/src/judge.ts`, `sandbox/src/tools.ts` | Regeln mit Locator/Reader und Werkzeugen prüfen |
+| `sandbox/standards/` | Mitgelieferte organisationsweite Regelbasis |
+
+## Grenzen des Prototyps
+
+- Feedback zu einzelnen Befunden wird gespeichert, aber nicht zum Training oder
+  zur Änderung späterer Prüfläufe verwendet.
+- Die Triage orientiert sich an Dateipfaden. Eine Regel kann daher übersehen
+  werden, wenn ihre Verletzung in einer dem Namen nach unverdächtigen Datei
+  liegt.
+- Es gibt keine sprachspezifische Analyse oder Schweregrad-Priorisierung.
+- Die Bachelorarbeit beschreibt die empirische Evaluation und die gemessenen
+  Festlegungen, auf denen Parameter wie Werkzeugbudget, Parallelität und die
+  Ausgabe von Kommentaren beruhen.
