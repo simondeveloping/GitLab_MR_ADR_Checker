@@ -1,7 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import Link from "next/link";
-import { BookOpen, FileText } from "lucide-react";
+import { BookOpen, ChevronDown, FileText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableHead, TableHeader, TableRow, TableCell } from "@/components/ui/table";
@@ -123,7 +123,7 @@ export default async function GroupAdrsPage() {
                         <span className="adr-table-title"><span className="adr-file-icon"><FileText size={17} /></span><strong>{adr.title}</strong></span>
                         <code className="adr-table-file">{adr.file}</code>
                         <span><Badge variant="success">Angenommen</Badge></span>
-                        <span className="adr-table-chevron" aria-hidden="true" />
+                        <ChevronDown className="adr-table-chevron" aria-hidden="true" />
                       </summary>
                       <CardContent className="adr-body"><MarkdownContent content={adr.content} /></CardContent>
                     </details>

@@ -17,6 +17,7 @@ import { NextResponse } from "next/server";
 import { secretMatches } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { createReview, startReview } from "@/lib/orchestrator";
+import { writeOperationalLog } from "@/lib/operational-log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -88,6 +89,12 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const review = await createReview(projectId, mrIid, repoUrl);
+  writeOperationalLog("application.log", {
+    event: "review_accepted",
+    reviewId: review.id,
+    projectId,
+    mrIid,
+  });
 
   // Bewusst ohne await: GitLab erwartet eine schnelle Quittung, der Prüflauf
   // dauert Minuten.

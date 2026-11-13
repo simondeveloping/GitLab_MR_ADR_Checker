@@ -1,9 +1,11 @@
-# ADR-Review-Agent für GitLab Merge Requests
+# Code-Review-Agent für GitLab Merge Requests
 
 Dieses Repository enthält den lauffähigen Prototypen aus Kapitel 7 der
-Bachelorarbeit. Der Agent prüft neu geöffnete GitLab Merge Requests anhand der
-Architecture Decision Records (ADRs) des Projekts und meldet
-nachvollziehbare Befunde zurück in den Merge Request.
+Bachelorarbeit. Der Agent prüft neu geöffnete GitLab Merge Requests automatisch
+anhand der Projektkonfiguration: Projekte mit gültigen Architecture Decision
+Records (ADRs) erhalten einen Architektur-Review gegen Projekt-ADRs und
+Gruppenstandards. Projekte ohne gültige Projekt-ADRs erhalten einen
+lernfreundlichen Code-Review mit Erklärungen zu konkreten möglichen Bugs.
 
 Das System ist ein Forschungsprototyp und kein allgemeines statisches
 Analysetool: Ein OpenAI-kompatibles Sprachmodell extrahiert und bewertet Regeln.
@@ -17,25 +19,39 @@ Der Review-Ablauf besteht aus drei Komponenten:
 2. **Next.js-Backend** prüft das Webhook-Secret, lädt Merge-Request-Metadaten,
    legt einen Review-Datensatz an und startet die Sandbox im Hintergrund.
 3. **Podman-Sandbox** klont den betroffenen Commit, erstellt den Diff und führt
-   die ADR-basierte Analyse in einem kurzlebigen Container aus. Das Ergebnis
+   die passende Architektur- oder Lernanalyse in einem kurzlebigen Container aus. Das Ergebnis
    geht per authentifiziertem Callback zurück an das Backend; anschließend wird
    der Container entfernt.
 
 Die Prüfung läuft in diesen Schritten:
 
-1. Als Regelbasis werden ADRs aus `docs/adr/` verwendet. Fehlen dort passende
-   ADRs, greift der mitgelieferte Gruppenstandard aus `sandbox/standards/`.
+1. Wenn gültige, angenommene ADRs aus `docs/adr/` vorhanden sind, werden sie
+   gemeinsam mit dem mitgelieferten Gruppenstandard aus `sandbox/standards/`
+   verwendet. Fehlen gültige Projekt-ADRs, wird automatisch der Lernmodus
+   aktiviert; Gruppenstandards lösen in diesem Fall keinen Architektur-Review aus.
    ADR-Dateien werden dabei nicht als Prüfgegenstand behandelt und aus dem
    Merge-Request-Diff für die Code-Prüfung ausgeschlossen. Enthält ein MR nur
-   ADR-Änderungen, wird kein Code-Review gestartet.
-2. Aus den ADRs werden einzelne, prüfbare Regeln extrahiert.
-3. Eine Triage wählt Regeln aus, die für die geänderten Dateipfade relevant
-   erscheinen.
-4. Für jede ausgewählte Regel sucht ein **Locator** nach Evidenz; ein **Reader**
-   bewertet die gefundene Stelle. Die Urteile lauten `C` (eingehalten), `NC`
-   (nicht konform/verletzt) oder `CIA` (nicht entscheidbar).
-5. `NC`-Befunde werden nach ADR gruppiert und, sofern möglich, als Inline-
-   Diskussion an geänderten Zeilen veröffentlicht. Andere Befunde sowie
+   ADR-Änderungen oder herausgefiltertes Rauschen, gibt es nichts zu prüfen.
+2. Im Architekturmodus werden aus den ADRs einzelne, prüfbare Regeln
+   extrahiert. Eine Triage wählt Regeln aus, die für geänderte Dateipfade
+   relevant erscheinen; Locator und Reader suchen und bewerten Belegstellen.
+   Die Urteile lauten `C` (eingehalten), `NC` (nicht konform/verletzt) oder
+   `CIA` (nicht entscheidbar).
+3. Im Lernmodus bewertet das Modell den Diff im Zusammenhang mit dem ganzen
+   ausgecheckten Repository. Es kann gezielt nach referenzierten Dateien,
+   Funktionen, Imports, Routen und API-Verträgen suchen und passende Stellen
+   lesen. Jeder Hinweis muss auf eine hinzugefügte Diff-Zeile zurückführbar sein;
+   Repo-übergreifende Aussagen müssen zusätzlich gelesene Belegstellen nennen.
+    Hinweise erklären eine mögliche Folge und enthalten einen konkreten,
+    direkt umsetzbaren Verbesserungsvorschlag; bei Bedarf nennen sie auch einen
+    passenden Regressionstest. Das Lernbudget ist höher als das des
+    Architekturmodus. Reine Stilpräferenzen ohne konkreten Nachteil werden
+    nicht gemeldet.
+4. Im Architekturmodus werden `NC`-Befunde nach ADR gruppiert. Im Lernmodus
+    werden konkrete Hinweise mit möglicher Folge und Verbesserungsvorschlag
+    einzeln veröffentlicht; die Kommentare sind ausdrücklich
+   nicht blockierend. Befunde erscheinen, sofern möglich, als Inline-
+   Diskussion an geänderten Zeilen. Andere Befunde sowie
    Werkzeugprotokolle und Laufdetails sind auf der Review-Seite des Backends
    einsehbar. Ein Sammelkommentar im Merge Request verlinkt auf diese Seite.
 
@@ -57,6 +73,42 @@ werden ignoriert.
 
 ## Einrichtung und Start
 
+### Start mit Podman Compose
+
+Die Anwendung kann mit Podman Compose gestartet werden. Voraussetzung ist ein
+laufender Podman-API-Socket auf dem Host; die App verwendet ihn, um für Reviews
+die kurzlebigen Sandbox-Container zu erzeugen. Der Socket-Zugriff verleiht der
+Anwendung weitreichende Rechte auf dem Podman-Host und sollte daher nur in einer
+vertrauenswürdigen Umgebung aktiviert werden.
+
+```bash
+cp .env.example .env
+systemctl --user enable --now podman.socket
+```
+
+Die Compose-Datei verwendet den rootless Socket unter
+`$XDG_RUNTIME_DIR/podman/podman.sock`. Der Sandbox-Callback wird unverändert aus
+`CALLBACK_BASE_URL` in `.env` übernommen. Starte und baue alles als derselbe
+Benutzer – **ohne `sudo`** –, damit App, Sandbox-Image und Socket dieselbe
+Podman-Instanz verwenden. Trage anschließend die erforderlichen GitLab-,
+Webhook- und LLM-Werte in `.env` ein. Zum Starten:
+
+```bash
+podman compose up --build -d
+```
+
+Compose baut dabei sowohl das App-Image als auch das Sandbox-Image. Die App
+lauscht im Container auf Port **5000**; rootless Podman veröffentlicht sie
+standardmäßig auf VM-Port **80** (`80:5000`). Da Port 80 für deinen User
+freigegeben ist, kann rootless Podman ihn direkt binden. Richte das externe
+Portforwarding so ein, dass `localhost:80` an VM-Port **80** weitergeleitet
+wird. Reviews und Logs bleiben in `data/` und `logs/` auf dem Host erhalten.
+Zum Stoppen genügt
+`podman compose down`; die persistenten Daten werden dabei nicht gelöscht.
+
+Mit `APP_PORT` lässt sich bei Bedarf der VM-Port ändern; das externe
+Portforwarding muss dann auf diesen Port zeigen.
+
 ### 1. Voraussetzungen installieren
 
 Im Projektverzeichnis die Abhängigkeiten installieren und eine lokale
@@ -73,7 +125,7 @@ mindestens folgende Werte ein:
 | Variable | Bedeutung |
 | --- | --- |
 | `GITLAB_HOST` / `GITLAB_TOKEN` | GitLab-URL und Zugriffstoken für eine Instanz; alternativ `GITLAB_CONNECTIONS` verwenden |
-| `GITLAB_CONNECTIONS` | Optional: JSON-Liste mehrerer GitLab-Verbindungen, jeweils mit `host`, `token` und optional `projects`; wenn gesetzt, ersetzt sie `GITLAB_HOST` / `GITLAB_TOKEN` |
+| `GITLAB_CONNECTIONS` | JSON-Liste mehrerer Verbindungen mit `host`, `token` und optional `projects`; wenn gesetzt, ersetzt sie `GITLAB_HOST` / `GITLAB_TOKEN` |
 | `GITLAB_WEBHOOK_SECRET` | Langes, zufälliges Geheimnis zur Prüfung eingehender GitLab-Webhooks |
 | `LLM_BASE_URL` | Basis-URL des OpenAI-kompatiblen Modell-Gateways, inklusive `/v1` falls erforderlich |
 | `LLM_API_KEY` | API-Schlüssel für das Modell-Gateway |
@@ -91,9 +143,9 @@ Für lokale Tests muss GitLab den Entwicklungsrechner erreichen können. Dazu
 kann ein HTTPS-Tunnel verwendet werden. Trage dessen öffentliche URL als
 `PUBLIC_BASE_URL` ein, zum Beispiel `https://beispiel-tunnel.example`; die
 Webhook-URL lautet dann `https://beispiel-tunnel.example/api/gitlab/webhook`.
-Der Standardwert von `CALLBACK_BASE_URL` (`http://host.containers.internal:3000`)
-passt bei üblichen Podman-Setups. Bei abweichendem Host, Port oder Container-
-Netzwerk muss die URL angepasst werden. Backend und Container müssen GitLab und
+Der Wert von `CALLBACK_BASE_URL` muss aus dem Sandbox-Container erreichbar sein.
+Bei Podman ist `host.containers.internal` häufig geeignet; verwende den Host und
+Port, die in deiner Umgebung erreichbar sind. Backend und Container müssen GitLab und
 das LLM-Gateway erreichen können; der Container muss außerdem die
 `CALLBACK_BASE_URL` erreichen.
 
@@ -101,21 +153,23 @@ das LLM-Gateway erreichen können; der Container muss außerdem die
 
 Für eine einzelne GitLab-Instanz genügt ein Token, das auf alle zu prüfenden
 Projekte zugreifen darf und Merge-Request-Diskussionen erstellen und löschen
-kann. Für mehrere Instanzen oder unterschiedliche Token pro Projekt kann
-`GITLAB_CONNECTIONS` verwendet werden. Beispiel für `.env.local` (als
-einzeiliger JSON-Wert):
+kann. Für mehrere Instanzen oder unterschiedliche Token pro Projekt verwende
+`GITLAB_CONNECTIONS`. Definiere **entweder** `GITLAB_CONNECTIONS` **oder**
+`GITLAB_HOST`/`GITLAB_TOKEN`. Das JSON kommt als einzeiliger Wert in `.env.local`;
+einfache Anführungszeichen außen schützen den Wert vor Shell- und dotenv-Parsing:
 
 ```env
-GITLAB_CONNECTIONS=[{"host":"https://gitlab.example.com","token":"<TOKEN_A>","projects":["group/project-a","group/project-b"]},{"host":"https://gitlab.other.net","token":"<TOKEN_B>"}]
+GITLAB_CONNECTIONS='[{"host":"https://gitlab.example.com","token":"<TOKEN_A>","projects":["group/project-a","group/project-b"]},{"host":"https://gitlab.example.com","token":"<TOKEN_B>","projects":["other-group/project-c"]},{"host":"https://gitlab.other.net","token":"<TOKEN_C>"}]'
 ```
 
-`host` ist die GitLab-Basis-URL. `projects` kann Projektpfade relativ zu diesem
-Host (zum Beispiel `gruppe/projekt`) oder vollständige HTTP(S)-Repository-URLs
-enthalten. Ohne `projects` gilt der Token für alle Repositories auf dem
-angegebenen Host. Für verschiedene Tokens auf derselben Instanz müssen die
-Projekte explizit zugeordnet werden. Jedes Projekt muss genau einer Verbindung
-zugeordnet sein. Beim Setzen von `GITLAB_CONNECTIONS` werden die Einzelvariablen
-`GITLAB_HOST` und `GITLAB_TOKEN` nicht als zusätzlicher Fallback verwendet.
+`host` ist die GitLab-Basis-URL. `projects` enthält Projektpfade relativ zu
+diesem Host (zum Beispiel `gruppe/projekt`) oder vollständige HTTP(S)-URLs.
+Ohne `projects` gilt der Token für alle Repositories auf dem angegebenen Host.
+Für verschiedene Tokens auf derselben Instanz müssen die Projekte explizit und
+ohne Überschneidung zugeordnet werden. Die Protokolle HTTP und HTTPS gelten bei
+der Zuordnung als derselbe Host. Beim Setzen von `GITLAB_CONNECTIONS` werden die
+Einzelvariablen `GITLAB_HOST` und `GITLAB_TOKEN` nicht als zusätzlicher Fallback
+verwendet.
 
 ### 3. Sandbox bauen und Anwendung starten
 
@@ -192,6 +246,17 @@ Die Seite **Monitor → Logs** ist derzeit ein Platzhalter. Die Einstellungen
 ändern aktuell nur das Farbschema der Oberfläche; GitLab-Tokens und andere
 Serverkonfiguration werden in `.env.local` verwaltet.
 
+### Betriebsprotokolle
+
+Wichtige Anwendungs- und Containerereignisse werden im Projektordner `logs/`
+gespeichert: `application.log` enthält angenommene Reviews sowie Start-, Ende-
+und Fehlerereignisse; `containers.log` enthält kompakte Zusammenfassungen und
+Fehler aus den Prüf-Containern. Normale Fortschrittsmeldungen und einzelne
+Werkzeug-/Modellaufrufe werden nicht in diese Dateien geschrieben. Jede Datei
+wird bei 1 MiB rotiert; zusätzlich bleibt jeweils höchstens eine ältere Datei
+mit der Endung `.1` erhalten. Zugangsdaten werden vor dem Schreiben maskiert,
+und Logdateien sind von Git ausgeschlossen.
+
 ## Fehlerbehebung
 
 - **Es erscheint kein Review:** Prüfe, ob die letzte GitLab-Webhook-Zustellung
@@ -203,6 +268,18 @@ Serverkonfiguration werden in `.env.local` verwaltet.
   Host und `projects` zur Repository-URL des Webhooks passen.
 - **Review schlägt beim Sandbox-Start fehl:** Baue das Image erneut mit
   `npm run sandbox:build` und prüfe, ob Podman installiert und ausführbar ist.
+- **`EACCES` beim Schreiben nach `data/` oder `logs/`:** Die Verzeichnisse
+  müssen deinem Host-Benutzer gehören, wenn du rootless Podman verwendest. Falls
+  sie zuvor mit rootful Podman angelegt wurden, stoppe den Stack und korrigiere
+  die Besitzrechte einmalig:
+
+  ```bash
+  podman compose down
+  sudo chown -R "$(id -u):$(id -g)" data logs
+  podman compose up -d
+  ```
+
+  Der normale Build und Start laufen danach wieder ohne `sudo`.
 - **Der Lauf bleibt hängen oder der Callback schlägt fehl:** Prüfe, ob der
   Container die `CALLBACK_BASE_URL` erreichen kann und ob Backend, LLM-Gateway
   und GitLab aus dem Container erreichbar sind. Die Fehlerdetails stehen bei
@@ -236,7 +313,8 @@ separaten TypeScript-Prüfkern aus `sandbox/src/` sowie die Gruppenstandards aus
 | `src/lib/publish.ts`, `src/lib/comment.ts` | Befunde formatieren und in GitLab veröffentlichen |
 | `src/app/` | Übersichts- und Detailseiten sowie Feedback-Formular |
 | `sandbox/src/checkout.ts` | Repository auschecken und Änderungssatz vorbereiten |
-| `sandbox/src/rulebase.ts` | Projekt-ADRs und Rückfall auf den Gruppenstandard laden |
+| `sandbox/src/rulebase.ts` | Automatisch Architektur- und Lernmodus wählen; Regelbasen kombinieren |
+| `sandbox/src/learning.ts` | Diffgebundene, lernfreundliche Code-Hinweise erzeugen |
 | `sandbox/src/extract.ts`, `sandbox/src/triage.ts` | Regeln extrahieren und vorfiltern |
 | `sandbox/src/judge.ts`, `sandbox/src/tools.ts` | Regeln mit Locator/Reader und Werkzeugen prüfen |
 | `sandbox/standards/` | Mitgelieferte organisationsweite Regelbasis |

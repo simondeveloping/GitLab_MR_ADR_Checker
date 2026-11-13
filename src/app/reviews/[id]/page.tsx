@@ -8,7 +8,7 @@
 
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowLeft, ArrowUpRight } from "lucide-react";
 import { getReview } from "@/lib/store";
 import { ruleSource } from "@/lib/comment";
 import { findingsOf, verdictCounts, withVerdict } from "@/lib/findings";
@@ -29,11 +29,12 @@ const VERDICT_LABEL: Record<Verdict, string> = {
 const VERDICT_ORDER: Verdict[] = ["NC", "CIA", "C"];
 
 function formatDuration(durationMs: number): string {
-  const totalSeconds = Math.round(durationMs / 1000);
-  if (totalSeconds < 60) return `${totalSeconds}s`;
+  if (durationMs < 1000) return `${Math.round(durationMs)}ms`;
+  const totalSeconds = durationMs / 1000;
+  if (totalSeconds < 60) return `${totalSeconds.toFixed(1)}s`;
 
   const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
+  const seconds = Math.floor(totalSeconds % 60);
   return `${minutes} min ${seconds}s`;
 }
 
@@ -64,7 +65,9 @@ function FindingCard({
           )}
         </a>
         <span className={`badge badge-${finding.verdict}`}>
-          {finding.verdict} · {VERDICT_LABEL[finding.verdict]}
+          {finding.rule.origin === "learning"
+            ? "Lernhinweis"
+            : `${finding.verdict} ${VERDICT_LABEL[finding.verdict]}`}
         </span>
       </div>
 
@@ -110,7 +113,12 @@ function FindingCard({
       <div className="finding-description">
         <p className="finding-rule">{finding.rule.text}</p>
         <p className="finding-rationale">{finding.rationale}</p>
-
+        {finding.consequence ? (
+          <p><strong>Mögliche Folge:</strong> {finding.consequence}</p>
+        ) : null}
+        {finding.suggestion ? (
+          <p><strong>Mögliche Verbesserung:</strong> {finding.suggestion}</p>
+        ) : null}
         {finding.evidence.length > 0 ? (
           <ul className="finding-evidence">
             {finding.evidence.map((evidence, index) => (
@@ -150,14 +158,14 @@ export default async function ReviewDetailPage({
   return (
     <>
       <p className="meta">
-        <Link href="/">← alle Reviews</Link>
+        <Link href="/"><ArrowLeft size={14} aria-hidden="true" /> alle Reviews</Link>
       </p>
 
       <h1>
         {review.mr.projectPath} !{review.mr.mrIid}
       </h1>
       <p className="subtitle">
-        <a href={review.mr.webUrl}>In GitLab öffnen ↗</a>
+        <a href={review.mr.webUrl}>In GitLab öffnen <ArrowUpRight size={14} aria-hidden="true" /></a>
       </p>
 
       <ReviewProgress
@@ -184,7 +192,11 @@ export default async function ReviewDetailPage({
         <div>
           <span className="stat-label">Regelbasis</span>
           <span className="stat-value">
-            {result?.ruleOrigin === "group"
+            {result?.mode === "learning"
+              ? "Lernmodus"
+              : result?.ruleOrigin === "combined"
+                ? "Projekt-ADRs + Gruppenstandards"
+                : result?.ruleOrigin === "group"
               ? "Gruppenstandard"
               : result?.ruleOrigin === "project"
                 ? "Projekt-ADRs"
@@ -192,21 +204,21 @@ export default async function ReviewDetailPage({
           </span>
         </div>
         <div>
-          <span className="stat-label">Regeln geprüft</span>
+          <span className="stat-label">{result?.mode === "learning" ? "Lernhinweise" : "Regeln geprüft"}</span>
           <span className="stat-value">{findings.length}</span>
         </div>
         <div>
-          <span className="stat-label">Verstöße</span>
+          <span className="stat-label">{result?.mode === "learning" ? "Lernhinweise" : "Verstöße"}</span>
           <span className="stat-value" style={{ color: "var(--nc)" }}>
             {counts.NC}
           </span>
         </div>
-        <div>
+        {result?.mode !== "learning" ? <div>
           <span className="stat-label">Nicht entscheidbar</span>
           <span className="stat-value" style={{ color: "var(--cia)" }}>
             {counts.CIA}
           </span>
-        </div>
+        </div> : null}
         <div>
           <span className="stat-label">Laufzeit</span>
           <span className="stat-value">
@@ -215,11 +227,31 @@ export default async function ReviewDetailPage({
         </div>
       </div>
 
+      {result?.stats.phases ? (
+        <section className="review-timings" aria-label="Laufzeiten je Phase">
+          <h2>Laufzeiten je Phase</h2>
+          <dl>
+            {Object.entries(result.stats.phases).map(([phase, duration]) => (
+              <div key={phase}>
+                <dt>{phase === "checkoutMs" ? "Checkout" :
+                  phase === "rulebaseMs" ? "Regelbasis" :
+                  phase === "extractionMs" ? "Regelextraktion" :
+                  phase === "triageMs" ? "Vorfilter" :
+                  phase === "judgingMs" ? "Regelprüfung" : "Code-Analyse"}</dt>
+                <dd>{typeof duration === "number" ? formatDuration(duration) : "—"}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ) : null}
+
       {result ? (
         <>
           <div className="adr-source-link">
-            <span>{result.adrFiles.length} ADR{result.adrFiles.length === 1 ? "" : "s"} als Regelbasis</span>
-            {result.ruleOrigin === "group" ? <Link href="/group-adrs">Gruppen-ADRs ansehen <ArrowUpRight size={14} /></Link> : null}
+            <span>{result.mode === "learning"
+              ? "Automatisch aktiviert, weil keine gültigen Projekt-ADRs gefunden wurden."
+              : `${result.adrFiles.length} Projekt-/Gruppen-ADR${result.adrFiles.length === 1 ? "" : "s"} als Regelbasis`}</span>
+            {result.mode === "architecture" ? <Link href="/group-adrs">Gruppen-ADRs ansehen <ArrowUpRight size={14} /></Link> : null}
           </div>
 
           {VERDICT_ORDER.map((verdict) => {
@@ -232,7 +264,9 @@ export default async function ReviewDetailPage({
               // entfernt (NFA-3).
               <details key={verdict} open={verdict === "NC"}>
                 <summary className="section-toggle">
-                  {VERDICT_LABEL[verdict]} ({group.length})
+                  {result.mode === "learning" && verdict === "NC"
+                    ? `Lernhinweise (${group.length})`
+                    : `${VERDICT_LABEL[verdict]} (${group.length})`}
                 </summary>
             {group.map((finding) => (
               <FindingCard

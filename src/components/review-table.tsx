@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, ArrowUpRight, CircleAlert } from "lucide-react";
+import { ArrowDown, ArrowUpDown, ArrowUpRight, CircleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { findingsOf, verdictCounts } from "@/lib/findings";
@@ -32,10 +33,13 @@ function SortableHeading({ label, column, current, direction, onSort }: {
   onSort: (column: SortKey) => void;
 }) {
   const active = current === column;
-  const Icon = active ? direction === "asc" ? ArrowUp : ArrowDown : ArrowUpDown;
+  const nextDirection = active
+    ? direction === "asc" ? "desc" : "asc"
+    : column === "createdAt" ? "desc" : "asc";
+  const Icon = active ? ArrowDown : ArrowUpDown;
   return (
-    <button className={`table-sort${active ? " is-active" : ""}`} onClick={() => onSort(column)} aria-label={`Nach ${label} ${active && direction === "asc" ? "absteigend" : "aufsteigend"} sortieren`}>
-      <span>{label}</span><Icon size={14} aria-hidden="true" />
+    <button className={`table-sort${active ? " is-active" : ""}`} onClick={() => onSort(column)} aria-label={`Nach ${label} ${nextDirection === "asc" ? "aufsteigend" : "absteigend"} sortieren`}>
+      <span>{label}</span><Icon size={14} className={active && direction === "asc" ? "sort-icon-ascending" : undefined} aria-hidden="true" />
     </button>
   );
 }
@@ -44,7 +48,18 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
-export function ReviewTable({ reviews }: { reviews: Review[] }) {
+function highlightMatches(text: string, query: string): ReactNode {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) return text;
+
+  const escapedQuery = trimmedQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const parts = text.split(new RegExp(`(${escapedQuery})`, "gi"));
+  return parts.map((part, index) => part.toLocaleLowerCase("de-DE") === trimmedQuery.toLocaleLowerCase("de-DE")
+    ? <mark className="search-highlight" key={`${index}-${part}`}>{part}</mark>
+    : part);
+}
+
+export function ReviewTable({ reviews, highlightQuery = "" }: { reviews: Review[]; highlightQuery?: string }) {
   const [sortBy, setSortBy] = useState<SortKey>("createdAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
@@ -99,14 +114,14 @@ export function ReviewTable({ reviews }: { reviews: Review[] }) {
               <TableRow key={review.id}>
                 <TableCell>
                   <div className="mr-main">
-                    <span className="mr-project" title={review.mr.projectPath}>{review.mr.projectPath}</span>
-                    <Link className="mr-title" href={`/reviews/${review.id}`} title={review.mr.title}>{review.mr.title} <span className="mr-number">!{review.mr.mrIid}</span></Link>
+                    <span className="mr-project" title={review.mr.projectPath}>{highlightMatches(review.mr.projectPath, highlightQuery)}</span>
+                    <Link className="mr-title" href={`/reviews/${review.id}`} title={review.mr.title}>{highlightMatches(review.mr.title, highlightQuery)} <span className="mr-number">{highlightMatches(`!${review.mr.mrIid}`, highlightQuery)}</span></Link>
                   </div>
                 </TableCell>
                 <TableCell><div className="status-cell">{statusBadge(review.status)}{review.error ? <span className="row-error" title={review.error}><CircleAlert size={13} /></span> : null}</div></TableCell>
                 <TableCell>
                   {review.result ? (
-                    <div className="checks-cell"><span>{findings.length}</span><span className="check-breakdown"><span className="count-nc">{counts.NC} Verstöße</span></span></div>
+                    <div className="checks-cell"><span>{findings.length}</span><span className="check-breakdown"><span className={`count-nc${counts.NC === 0 ? " is-clear" : " is-violation"}`}>{counts.NC} Verstöße</span></span></div>
                   ) : <span className="muted-dash">—</span>}
                 </TableCell>
                 <TableCell className="date-cell">{formatDate(review.createdAt)}</TableCell>

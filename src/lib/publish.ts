@@ -120,8 +120,11 @@ export interface PublishResult {
 export async function publishFindings(review: Review): Promise<PublishResult> {
   const baseUrl = env.publicBaseUrl;
   const violations = violatedRules(review);
+  const learning = review.result?.mode === "learning";
 
   if (violations.length === 0) {
+    if (learning) return { published: [], reported: 0 };
+
     const summaryDiscussionId = await createFallbackComment(
       review.mr.projectId,
       review.mr.mrIid,
@@ -185,13 +188,16 @@ export async function publishFindings(review: Review): Promise<PublishResult> {
     }
   }
 
-  // Zuletzt, damit der Einstieg in den Bericht unter den Einzelbefunden steht.
-  const summaryDiscussionId = await createFallbackComment(
-    review.mr.projectId,
-    review.mr.mrIid,
-    renderSummary(review, baseUrl),
-    review.mr.repoUrl,
-  );
+  // Lernmodus meldet ausschließlich einzelne Kommentare mit Verbesserung;
+  // Architekturprüfungen erhalten zusätzlich ihren zusammenfassenden Bericht.
+  const summaryDiscussionId = learning
+    ? undefined
+    : await createFallbackComment(
+        review.mr.projectId,
+        review.mr.mrIid,
+        renderSummary(review, baseUrl),
+        review.mr.repoUrl,
+      );
 
   return { published, reported: violations.length, summaryDiscussionId };
 }

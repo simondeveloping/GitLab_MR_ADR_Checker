@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
+import { cookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
-import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -14,15 +14,18 @@ export const viewport: Viewport = {
   themeColor: "#ffffff",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const storedTheme = (await cookies()).get("adr-review-theme")?.value;
+  const theme = storedTheme === "dark" ? "dark" : "light";
+
   return (
-    <html lang="de">
+    <html lang="de" data-theme={theme}>
       <body>
-        <ThemeProvider><AppShell>{children}</AppShell></ThemeProvider>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

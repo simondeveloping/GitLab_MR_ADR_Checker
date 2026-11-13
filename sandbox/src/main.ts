@@ -4,13 +4,13 @@
  * Trägt den gesamten Prüfvorgang aus Abbildung 7.1:
  *
  *   1 Checkout        Repository klonen, Diff als Patch-Datei ablegen, Rauschen filtern
- *   2 Regelbasis      docs/adr/ im Projekt, sonst Rückfall auf den Gruppenstandard
- *   3 Regelextraktion jedes ADR wird in für den MR relevante Regeln zerlegt
- *   4 Vorfilter       Regeln ohne Bezug zu einer geänderten Datei fallen heraus
+ *   2 Modus           Projekt-ADRs plus Gruppenstandards, andernfalls Lernmodus
+ *   3 Regelextraktion Architekturregeln werden in prüfbare Einzelregeln zerlegt
+ *   4 Vorfilter       irrelevante Architekturregeln fallen heraus
  *
  * ADR-Dateien dienen ausschließlich als Regelbasis. Sie werden aus dem
  * Änderungssatz entfernt und nie als Prüfgegenstand oder Patch-Kontext genutzt.
- *   5 Prüfung        je Regel: Locator sucht, Reader liest und urteilt
+ *   5 Prüfung        Architekturregeln: Locator/Reader; Lernmodus: Diff-Review
  *   6 Befunde         je Regel ein Urteil mit Begründung und Belegstelle
  *
  * Danach schickt das Skript die Antworten gebündelt per HTTP-Callback an das
@@ -28,6 +28,7 @@ import { checkout } from "./checkout.js";
 import { mapWithConcurrency } from "./concurrency.js";
 import { extractRules } from "./extract.js";
 import { judgeRule } from "./judge.js";
+import { reviewForLearning } from "./learning.js";
 import { loadRuleBase } from "./rulebase.js";
 import { setExcludedAdrPaths } from "./tools.js";
 import { counters, log } from "./trace.js";
@@ -70,14 +71,19 @@ async function main(): Promise<void> {
     reviewId: config.reviewId,
     model: config.llmModel,
     budget: config.budget,
+    learningBudget: config.learningBudget,
     concurrency: config.concurrency,
   });
 
   // 1 Checkout
+  const checkoutStartedAt = performance.now();
   const { changedFiles, filteredFiles, excludedAdrFiles } = await checkout();
+  const checkoutMs = Math.round(performance.now() - checkoutStartedAt);
 
   // 2 Regelbasis
+  const rulebaseStartedAt = performance.now();
   const ruleBase = await loadRuleBase();
+  const rulebaseMs = Math.round(performance.now() - rulebaseStartedAt);
   // ADR-Dateien sind Regelbasis, aber kein Prüfgegenstand oder Beleg.
   setExcludedAdrPaths(ruleBase.excludedPaths);
 
@@ -92,12 +98,58 @@ async function main(): Promise<void> {
     relevantFiles: relevantFiles.length,
   });
 
+  if (ruleBase.mode === "learning") {
+    const analysisStartedAt = performance.now();
+    const learning = relevantFiles.length > 0
+      ? await reviewForLearning()
+      : { findings: [], failures: [] };
+    const analysisMs = Math.round(performance.now() - analysisStartedAt);
+    failures.push(...learning.failures);
+    const finishedAt = new Date();
+    const result: SandboxResult = {
+      reviewId: config.reviewId,
+      mode: "learning",
+      ruleOrigin: "learning",
+      adrFiles: [],
+      changedFiles,
+      rules: [],
+      droppedRules: [],
+      findings: learning.findings,
+      failures,
+      stats: {
+        startedAt: startedAt.toISOString(),
+        finishedAt: finishedAt.toISOString(),
+        durationMs: finishedAt.getTime() - startedAt.getTime(),
+        modelCalls: counters.modelCalls,
+        toolCalls: counters.toolCalls,
+        promptTokens: counters.promptTokens,
+        completionTokens: counters.completionTokens,
+        totalTokens: counters.totalTokens,
+        phases: { checkoutMs, rulebaseMs, analysisMs },
+        averageTokensPerCheckedRule:
+          learning.findings.length > 0 ? counters.totalTokens / learning.findings.length : 0,
+      },
+    };
+    log.info("run_summary", {
+      mode: "learning",
+      changedFiles: changedFiles.length,
+      findings: learning.findings.length,
+      failures: failures.length,
+      durationMs: result.stats.durationMs,
+      phases: result.stats.phases,
+    });
+    await sendCallback(result);
+    return;
+  }
+
   // 3 Regelextraktion; bei ADR-only-/Noise-only-MRs wird kein Review
   // gestartet und daher auch keine Regel-Extraktion benötigt.
+  const extractionStartedAt = performance.now();
   const extraction =
     relevantFiles.length > 0
       ? await extractRules(ruleBase.documents, relevantFiles)
       : { rules: [], failures: [], adrTokenUsage: [] };
+  const extractionMs = Math.round(performance.now() - extractionStartedAt);
   failures.push(...extraction.failures);
   log.info("extraction_done", {
     documents: ruleBase.documents.length,
@@ -106,10 +158,13 @@ async function main(): Promise<void> {
   });
 
   // 4 Vorfilter
+  const triageStartedAt = performance.now();
   const triaged = await triage(extraction.rules, relevantFiles);
+  const triageMs = Math.round(performance.now() - triageStartedAt);
   failures.push(...triaged.failures);
 
   // 5 Prüfung je Regel
+  const judgingStartedAt = performance.now();
   const judged = await mapWithConcurrency(
     triaged.selected,
     config.concurrency.judging,
@@ -124,12 +179,14 @@ async function main(): Promise<void> {
   );
   const findings: Finding[] = judged.map((outcome) => outcome.finding);
   failures.push(...judged.flatMap((outcome) => outcome.failures));
+  const judgingMs = Math.round(performance.now() - judgingStartedAt);
 
   const finishedAt = new Date();
 
   // 6 Befunde bündeln und zurückmelden
   const result: SandboxResult = {
     reviewId: config.reviewId,
+    mode: "architecture",
     ruleOrigin: ruleBase.origin,
     adrFiles: ruleBase.documents.map((doc) => doc.file),
     changedFiles,
@@ -147,6 +204,7 @@ async function main(): Promise<void> {
       promptTokens: counters.promptTokens,
       completionTokens: counters.completionTokens,
       totalTokens: counters.totalTokens,
+      phases: { checkoutMs, rulebaseMs, extractionMs, triageMs, judgingMs },
       averageTokensPerCheckedRule:
         findings.length > 0 ? counters.totalTokens / findings.length : 0,
       averageTokensPerAdr:
@@ -155,6 +213,8 @@ async function main(): Promise<void> {
   };
 
   log.info("run_summary", {
+    mode: "architecture",
+    ruleOrigin: ruleBase.origin,
     changedFiles: changedFiles.length,
     relevantFiles: relevantFiles.length,
     filteredFiles: filteredFiles.length,
@@ -170,6 +230,7 @@ async function main(): Promise<void> {
     completionTokens: counters.completionTokens,
     totalTokens: counters.totalTokens,
     durationMs: result.stats.durationMs,
+    phases: result.stats.phases,
   });
 
   await sendCallback(result);

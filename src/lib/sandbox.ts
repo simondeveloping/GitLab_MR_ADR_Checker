@@ -12,12 +12,22 @@
 import { spawn } from "node:child_process";
 import { env } from "./env";
 import { authenticatedRepoUrl } from "./gitlab";
+import { writeOperationalLog } from "./operational-log";
 import { updateReview } from "./store";
 import type { Review } from "./types";
 
 export interface SandboxOutcome {
   exitCode: number | null;
   timedOut: boolean;
+  runtimeError?: string;
+}
+
+function safeRuntimeError(value: string): string {
+  return value
+    .trim()
+    .replace(/(https?:\/\/)[^/@\s]+:[^/@\s]+@/gi, "$1[REDACTED]@")
+    .replace(/\b(?:glpat-|sk-)[^\s"'`]+/gi, "[REDACTED]")
+    .slice(-1500);
 }
 
 /**
@@ -47,6 +57,10 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
     BUDGET_SEARCH_ROUNDS: String(env.budget.searchRounds),
     BUDGET_FILE_READS: String(env.budget.fileReads),
     BUDGET_REFETCHES: String(env.budget.refetches),
+    LEARNING_BUDGET_SEARCH_ROUNDS: String(env.learningBudget.searchRounds),
+    LEARNING_BUDGET_FILE_READS: String(env.learningBudget.fileReads),
+    LEARNING_MAX_FINDINGS: String(env.learningBudget.maxFindings),
+    LEARNING_MAX_PATCH_BYTES: String(env.learningBudget.maxPatchBytes),
     EXTRACTION_CONCURRENCY: String(env.concurrency.extraction),
     JUDGING_CONCURRENCY: String(env.concurrency.judging),
   };
@@ -78,6 +92,13 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
     "512",
   ];
 
+  // CALLBACK_BASE_URL remains the externally configured URL, but inside a
+  // rootless Podman container its public DNS address may hairpin back to the
+  // VM and be refused. Resolve that same hostname to Podman's host gateway so
+  // the callback reaches this backend without changing the URL or HTTP Host.
+  const callbackHost = new URL(env.callbackBaseUrl).hostname;
+  args.push("--add-host", `${callbackHost}:host-gateway`);
+
   for (const key of Object.keys(envPairs)) {
     args.push("--env", key);
   }
@@ -91,6 +112,7 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
     });
 
     let pendingLine = "";
+    let stderrTail = "";
     let phase = "starting";
     let lastMessage = "Podman startet den Sandbox-Container.";
     let percent = 3;
@@ -127,6 +149,30 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
           event.fields && typeof event.fields === "object"
             ? (event.fields as Record<string, unknown>)
             : event;
+        if (["run_summary", "run_failed", "callback_failed"].includes(eventName)) {
+          const selectedFields: Record<string, unknown> = {};
+          for (const key of [
+            "mode",
+            "changedFiles",
+            "findings",
+            "failures",
+            "durationMs",
+            "phases",
+            "rules",
+            "checked",
+            "modelCalls",
+            "toolCalls",
+            "attempt",
+            "error",
+          ]) {
+            if (fields[key] !== undefined) selectedFields[key] = fields[key];
+          }
+          writeOperationalLog("containers.log", {
+            reviewId: review.id,
+            event: eventName,
+            ...selectedFields,
+          });
+        }
         switch (eventName) {
           case "run_start":
             progressChanged = true;
@@ -216,7 +262,10 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
       for (const line of lines) consumeLine(line);
     };
     child.stdout.on("data", capture);
-    child.stderr.on("data", capture);
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderrTail = `${stderrTail}${chunk.toString()}`.slice(-8192);
+      capture(chunk);
+    });
 
     void updateReview(review.id, (stored) => {
       stored.sandboxStartedAt = startedAt;
@@ -231,6 +280,11 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
       };
       stored.sandboxHeartbeatAt = startedAt;
     }).catch(() => undefined);
+    writeOperationalLog("application.log", {
+      event: "sandbox_started",
+      reviewId: review.id,
+      runtime: env.sandboxRuntime,
+    });
     const heartbeat = setInterval(() => persist(), 15_000);
     let timedOut = false;
     const timer = setTimeout(() => {
@@ -249,8 +303,19 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
       phase = "error";
       lastMessage = `Podman konnte nicht gestartet werden: ${error.message}`;
       percent = 0;
+      writeOperationalLog("application.log", {
+        event: "sandbox_start_failed",
+        reviewId: review.id,
+        error: error.message,
+      });
       persist();
-      void persistChain.then(() => resolve({ exitCode: null, timedOut }));
+      void persistChain.then(() =>
+        resolve({
+          exitCode: null,
+          timedOut,
+          runtimeError: safeRuntimeError(error.message),
+        }),
+      );
     });
 
     child.on("close", (code) => {
@@ -264,8 +329,22 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
         : code === 0
           ? "Review abgeschlossen."
           : "Die Prüfung wurde unerwartet beendet.";
+      writeOperationalLog("application.log", {
+        event: timedOut ? "sandbox_timeout" : code === 0 ? "sandbox_finished" : "sandbox_failed",
+        reviewId: review.id,
+        exitCode: code,
+        ...(code !== 0 && stderrTail ? { stderr: stderrTail.trim() } : {}),
+      });
       persist();
-      void persistChain.then(() => resolve({ exitCode: code, timedOut }));
+      void persistChain.then(() =>
+        resolve({
+          exitCode: code,
+          timedOut,
+          ...(stderrTail.trim()
+            ? { runtimeError: safeRuntimeError(stderrTail) }
+            : {}),
+        }),
+      );
     });
   });
 }

@@ -47,6 +47,19 @@ function configuredGitLabConnections(): GitLabConnection[] {
         `GITLAB_CONNECTIONS[${index}] benötigt die Felder host und token.`,
       );
     }
+    let host: URL;
+    try {
+      host = new URL(item.host);
+    } catch {
+      throw new Error(
+        `GITLAB_CONNECTIONS[${index}].host muss eine vollständige HTTP(S)-URL sein.`,
+      );
+    }
+    if (!/^https?:$/.test(host.protocol) || !item.token.trim()) {
+      throw new Error(
+        `GITLAB_CONNECTIONS[${index}] benötigt eine HTTP(S)-URL und einen nicht-leeren token.`,
+      );
+    }
     if (
       item.projects !== undefined &&
       (!Array.isArray(item.projects) ||
@@ -57,8 +70,8 @@ function configuredGitLabConnections(): GitLabConnection[] {
       );
     }
     return {
-      host: item.host.replace(/\/+$/, ""),
-      token: item.token,
+      host: item.host.trim().replace(/\/+$/, ""),
+      token: item.token.trim(),
       projects: item.projects as string[] | undefined,
     };
   });
@@ -66,7 +79,15 @@ function configuredGitLabConnections(): GitLabConnection[] {
 
 function projectKey(value: string): string {
   const url = new URL(value);
-  return `${url.origin}${url.pathname.replace(/\/+$/, "").replace(/\.git$/i, "")}`;
+  // GitLab kann für Web- und Clone-URLs unterschiedliche Protokolle liefern.
+  // Für die Projektzuordnung zählen Host, Port und Pfad, nicht http vs. https.
+  return `${url.host.toLowerCase()}${url.pathname.replace(/\/+$/, "").replace(/\.git$/i, "")}`;
+}
+
+function sameGitLabHost(left: URL, right: URL): boolean {
+  // Das konfigurierte GitLab kann intern per HTTP und extern per HTTPS
+  // erreichbar sein; Hostname und Port müssen aber übereinstimmen.
+  return left.host.toLowerCase() === right.host.toLowerCase();
 }
 
 /** Wählt die GitLab-Verbindung anhand der URL des betroffenen Repositorys. */
@@ -80,7 +101,7 @@ export function gitLabCredentials(repoUrl: string): GitLabConnection {
       const configuredHost = new URL(connection.host);
       const hostPath = configuredHost.pathname.replace(/\/$/, "");
       if (
-        configuredHost.origin !== repo.origin ||
+        !sameGitLabHost(configuredHost, repo) ||
         (hostPath &&
           repo.pathname !== hostPath &&
           !repo.pathname.startsWith(`${hostPath}/`))
@@ -107,7 +128,7 @@ export function gitLabCredentials(repoUrl: string): GitLabConnection {
     const configuredHost = new URL(connection.host);
     const hostPath = configuredHost.pathname.replace(/\/$/, "");
     return (
-      configuredHost.origin === repo.origin &&
+      sameGitLabHost(configuredHost, repo) &&
       (!hostPath ||
         repo.pathname === hostPath ||
         repo.pathname.startsWith(`${hostPath}/`))
@@ -128,7 +149,7 @@ export function gitLabCredentials(repoUrl: string): GitLabConnection {
     const configuredHost = new URL(legacyHost);
     const hostPath = configuredHost.pathname.replace(/\/$/, "");
     if (
-      configuredHost.origin === repo.origin &&
+      sameGitLabHost(configuredHost, repo) &&
       (!hostPath ||
         repo.pathname === hostPath ||
         repo.pathname.startsWith(`${hostPath}/`))
@@ -207,6 +228,15 @@ export const env = {
       searchRounds: optionalNumber("BUDGET_SEARCH_ROUNDS", 8),
       fileReads: optionalNumber("BUDGET_FILE_READS", 5),
       refetches: optionalNumber("BUDGET_REFETCHES", 2),
+    };
+  },
+  /** Separates higher coverage limits for the learning review. */
+  get learningBudget() {
+    return {
+      searchRounds: optionalNumber("LEARNING_BUDGET_SEARCH_ROUNDS", 24),
+      fileReads: optionalNumber("LEARNING_BUDGET_FILE_READS", 16),
+      maxFindings: optionalNumber("LEARNING_MAX_FINDINGS", 20),
+      maxPatchBytes: optionalNumber("LEARNING_MAX_PATCH_BYTES", 200_000),
     };
   },
   get concurrency() {

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, ChartNoAxesCombined, FileWarning, GitMerge, MessageSquareHeart, ScrollText, Settings } from "lucide-react";
+import { BookOpen, ChartNoAxesCombined, ChevronDown, FileWarning, GitMerge, MessageSquareHeart, ScrollText, Settings } from "lucide-react";
 import {
   SidebarContent,
   SidebarGroup,
@@ -31,7 +31,7 @@ export function SidebarNav() {
       <nav className="sidebar-nav" aria-label="Projektbereiche">
         <SidebarGroup>
           <details className="sidebar-collapsible-group" open>
-            <summary className="ui-sidebar-group-label sidebar-collapsible-label">Workspace</summary>
+            <summary className="ui-sidebar-group-label sidebar-collapsible-label">Workspace<ChevronDown className="sidebar-collapsible-chevron" aria-hidden="true" /></summary>
             <SidebarMenu>
               {items.map(({ href, label, icon: Icon }) => {
                 const active = href === "/" ? pathname === "/" || pathname.startsWith("/reviews/") : pathname.startsWith(href);
@@ -50,7 +50,7 @@ export function SidebarNav() {
         </SidebarGroup>
         <SidebarGroup>
           <details className="sidebar-collapsible-group" open>
-            <summary className="ui-sidebar-group-label sidebar-collapsible-label">Monitor</summary>
+            <summary className="ui-sidebar-group-label sidebar-collapsible-label">Monitor<ChevronDown className="sidebar-collapsible-chevron" aria-hidden="true" /></summary>
             <SidebarMenu>
               {monitorItems.map(({ href, label, icon: Icon }) => {
                 const active = pathname.startsWith(href);

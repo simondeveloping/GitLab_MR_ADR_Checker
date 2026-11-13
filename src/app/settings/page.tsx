@@ -1,5 +1,6 @@
-import { Moon, Settings, Sun } from "lucide-react";
+import { Bot, Moon, Settings, Sun } from "lucide-react";
 import { ThemeSettings } from "@/components/theme-settings";
+import { env } from "@/lib/env";
 
 export default function SettingsPage() {
   return (
@@ -14,6 +15,13 @@ export default function SettingsPage() {
           <div><h2 id="appearance-heading">Darstellung</h2><p>Wähle das Farbschema für die Anwendung.</p></div>
         </div>
         <ThemeSettings />
+      </section>
+      <section className="settings-card" aria-labelledby="reviewer-model-heading">
+        <div className="settings-card-heading">
+          <span className="settings-card-icon"><Bot size={19} /></span>
+          <div><h2 id="reviewer-model-heading">Reviewer-Modell</h2><p>Das aktuell für Code-Reviews konfigurierte Sprachmodell.</p></div>
+        </div>
+        <code className="settings-model">{env.llmModel}</code>
       </section>
     </>
   );

@@ -8,7 +8,8 @@
 
 export type Verdict = "C" | "NC" | "CIA";
 
-export type RuleOrigin = "project" | "group";
+export type RuleOrigin = "project" | "group" | "learning";
+export type RuleBaseOrigin = RuleOrigin | "combined";
 
 export interface Rule {
   id: string;
@@ -49,6 +50,9 @@ export interface Finding {
   rule: Rule;
   verdict: Verdict;
   rationale: string;
+  /** Zusätzliche Lernhinweise im automatisch aktivierten Lernmodus. */
+  consequence?: string;
+  suggestion?: string;
   evidence: Evidence[];
   trace: ToolCallTrace[];
   /** Nur protokolliert, nicht mehr als Unsicherheitssignal ausgewiesen. */
@@ -69,14 +73,15 @@ export interface DroppedRule {
 }
 
 export interface AgentFailure {
-  stage: "extract" | "triage" | "locator" | "reader";
+  stage: "extract" | "triage" | "locator" | "reader" | "learning";
   ruleId?: string;
   message: string;
 }
 
 export interface SandboxResult {
   reviewId: string;
-  ruleOrigin: RuleOrigin;
+  mode: "architecture" | "learning";
+  ruleOrigin: RuleBaseOrigin;
   adrFiles: string[];
   changedFiles: string[];
   rules: Rule[];
@@ -95,5 +100,13 @@ export interface SandboxResult {
     totalTokens?: number;
     averageTokensPerCheckedRule?: number;
     averageTokensPerAdr?: number;
+    phases?: {
+      checkoutMs?: number;
+      rulebaseMs?: number;
+      extractionMs?: number;
+      triageMs?: number;
+      judgingMs?: number;
+      analysisMs?: number;
+    };
   };
 }

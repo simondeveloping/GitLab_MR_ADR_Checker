@@ -17,6 +17,7 @@ import { findingsOf, verdictCounts } from "./findings";
 import type { Finding, Review } from "./types";
 
 export function originLabel(finding: Finding): string {
+  if (finding.rule.origin === "learning") return "Lernmodus";
   return finding.rule.origin === "group" ? "Global" : "Projekt";
 }
 
@@ -36,6 +37,7 @@ export function reviewUrl(
 
 /** Kurzkennung der Regelherkunft, die in jedem Kommentar auftaucht. */
 export function ruleSource(finding: Finding): string {
+  if (finding.rule.origin === "learning") return "[Lernmodus]";
   return `[${originLabel(finding)}] ${finding.rule.adrFile}`;
 }
 
@@ -47,7 +49,9 @@ export function ruleSource(finding: Finding): string {
 export function groupByAdr(findings: Finding[]): Map<string, Finding[]> {
   const groups = new Map<string, Finding[]>();
   for (const finding of findings) {
-    const key = `${finding.rule.origin}:${finding.rule.adrFile}`;
+    const key = finding.rule.origin === "learning"
+      ? `learning:${finding.id}`
+      : `${finding.rule.origin}:${finding.rule.adrFile}`;
     const bucket = groups.get(key);
     if (bucket) bucket.push(finding);
     else groups.set(key, [finding]);
@@ -68,12 +72,21 @@ export function renderComment(
   baseUrl: string,
 ): string {
   const first = findings[0];
+  if (first.rule.origin === "learning") {
+    const lines = [`**${first.rule.text}**`, "", first.rationale.trim()];
+    if (first.consequence) {
+      lines.push("", `**Mögliche Folge:** ${first.consequence.trim()}`);
+    }
+    if (first.suggestion) {
+      lines.push("", `**Verbesserung:** ${first.suggestion.trim()}`);
+    }
+    return lines.join("\n");
+  }
+
   const source = ruleSource(first);
   const lines: string[] = [];
 
-  lines.push(
-    `**Architekturkonformität: ${findings.length === 1 ? "1 Befund" : `${findings.length} Befunde`}** — \`${source}\``,
-  );
+  lines.push(`**Architekturkonformität: ${findings.length === 1 ? "1 Befund" : `${findings.length} Befunde`}** — \`${source}\``);
   lines.push("");
   lines.push(`Betroffene Architekturentscheidung: **${first.rule.adrTitle}**`);
   lines.push("");
@@ -97,10 +110,8 @@ export function renderComment(
       lines.push("");
     }
 
-    // Sprungmarke auf die Karte dieses Befunds: dort stehen die vollständige
-    // Belegkette und das Werkzeugprotokoll, die im Kommentar bewusst fehlen.
     lines.push(
-      `[Belegkette und Werkzeugprotokoll ansehen](${reviewUrl(baseUrl, review.id, finding.id)})`,
+      `[Vollständigen Bericht öffnen](${reviewUrl(baseUrl, review.id, finding.id)})`,
     );
     lines.push("");
   }
@@ -111,10 +122,8 @@ export function renderComment(
 /** Der kurzlebige Hinweiskommentar während des Laufs (Abschnitt 7.2.1). */
 export function renderPlaceholder(reviewId: string, baseUrl: string): string {
   return (
-    `**Architekturkonformitäts-Review läuft.**\n\n` +
-    `Der Merge Request wird gegen die Architecture Decision Records des Projekts geprüft. ` +
-    `Dieser Hinweis verschwindet, sobald das Ergebnis vorliegt; der Merge wird davon nicht aufgehalten.\n\n` +
-    `Der Lauf lässt sich währenddessen im Backend verfolgen: [Review öffnen](${reviewUrl(baseUrl, reviewId)})`
+    `Der Agent wurde gestartet und ist gleich fertig.\n\n` +
+    `[Review öffnen](${reviewUrl(baseUrl, reviewId)})`
   );
 }
 
@@ -133,14 +142,13 @@ export function renderSummary(review: Review, baseUrl: string): string {
   const findings = findingsOf(review);
   const counts = verdictCounts(findings);
   const violations = counts.NC;
+  const learning = review.result?.mode === "learning";
   const url = reviewUrl(baseUrl, review.id);
   const lines: string[] = [];
 
-  lines.push(
-    violations === 0
-      ? `**Architekturkonformität: keine Verstöße gefunden.**`
-      : `**Architekturkonformität: ${violations === 1 ? "1 Verstoß" : `${violations} Verstöße`} gefunden.**`,
-  );
+  lines.push(violations === 0
+    ? "**Architekturkonformität: keine Verstöße gefunden.**"
+    : `**Architekturkonformität: ${violations === 1 ? "1 Verstoß" : `${violations} Verstöße`} gefunden.**`);
   lines.push("");
 
   lines.push("| Urteil | Regeln |");
@@ -151,7 +159,7 @@ export function renderSummary(review: Review, baseUrl: string): string {
   lines.push(`| **geprüft** | **${findings.length}** |`);
   lines.push("");
 
-  if (violations > 0) {
+  if (violations > 0 && !learning) {
     lines.push(
       `${violations === 1 ? "Der Verstoß ist" : "Die Verstöße sind"} an der betroffenen Codestelle kommentiert.`,
     );

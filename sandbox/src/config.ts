@@ -72,6 +72,14 @@ export const config = {
     refetches: number("BUDGET_REFETCHES", 2),
   },
 
+  /** Eigene, groessere Budgets fuer den breiten Lern-Review. */
+  learningBudget: {
+    searchRounds: number("LEARNING_BUDGET_SEARCH_ROUNDS", 24),
+    fileReads: number("LEARNING_BUDGET_FILE_READS", 16),
+    maxFindings: number("LEARNING_MAX_FINDINGS", 20),
+    maxPatchBytes: number("LEARNING_MAX_PATCH_BYTES", 200_000),
+  },
+
   /**
    * Mehrere ADRs und Regeln sind unabhängige Prüfeinheiten. Begrenzte
    * Parallelität verkürzt die Wandzeit, ohne das Modellgateway unkontrolliert

@@ -1,0 +1,37 @@
+services:
+  sandbox-image:
+    image: localhost/adr-review-agent:latest
+    build:
+      context: ./sandbox
+      dockerfile: Containerfile
+    # Build the image as part of `podman compose up`; it is only run later,
+    # on demand, by the app through the host Podman socket. This helper exits
+    # after building and must not be a startup dependency of the app.
+    entrypoint: ["/bin/true"]
+    restart: "no"
+
+  app:
+    image: localhost/adr-review-app:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      SANDBOX_RUNTIME: podman
+      SANDBOX_IMAGE: localhost/adr-review-agent:latest
+      DATA_DIR: /app/data
+      PORT: 5000
+      CONTAINER_HOST: unix:///run/podman/podman.sock
+    ports:
+      - "${APP_PORT:-80}:5000"
+    security_opt:
+      # The host Podman socket is outside the container's SELinux label.
+      - label=disable
+    volumes:
+      - type: bind
+        source: ${XDG_RUNTIME_DIR}/podman/podman.sock
+        target: /run/podman/podman.sock
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped

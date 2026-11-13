@@ -25,9 +25,8 @@ WORKDIR /app
 COPY --from=build /build/dist ./dist
 COPY package.json ./
 
-# Organisationsweite Regelbasis. Sie greift, wenn das gepruefte Repository
-# selbst keine ADRs unter docs/adr/ mitbringt, und macht damit ein neues
-# Repository ohne jede Vorkonfiguration pruefbar (FA-3, NFA-9).
+# Organisationsweite Regelbasis. Sie wird nur zusaetzlich zu mindestens einem
+# gueltigen Projekt-ADR verwendet; ohne Projekt-ADRs laeuft der Lernmodus.
 COPY standards /opt/adr-standard
 
 # Der Agent arbeitet ausschliesslich lesend; alles, was der Lauf anlegt, liegt

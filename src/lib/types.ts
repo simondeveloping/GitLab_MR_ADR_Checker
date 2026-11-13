@@ -12,7 +12,8 @@
 export type Verdict = "C" | "NC" | "CIA";
 
 /** Herkunft der Regelbasis: Projekt-ADRs oder Gruppenstandard (FA-3). */
-export type RuleOrigin = "project" | "group";
+export type RuleOrigin = "project" | "group" | "learning";
+export type RuleBaseOrigin = RuleOrigin | "combined";
 
 /** Eine aus einem ADR gewonnene, einzeln entscheidbare Regel (FA-1). */
 export interface Rule {
@@ -62,6 +63,9 @@ export interface Finding {
   verdict: Verdict;
   /** Begründung des Readers, gehört zu jedem Urteil (FA-8). */
   rationale: string;
+  /** Zusätzliche Lernhinweise im automatisch aktivierten Lernmodus. */
+  consequence?: string;
+  suggestion?: string;
   /** Belegstelle; bei `C` und `NC` verpflichtend, bei `CIA` meist leer. */
   evidence: Evidence[];
   trace: ToolCallTrace[];
@@ -94,7 +98,7 @@ export interface DroppedRule {
 /** Nicht formatgerechte Modellantwort; wird verworfen, nicht gewertet (NFA-2). */
 export interface AgentFailure {
   /** `triage` heißt in der Oberfläche "Vorfilter"; siehe `STAGE_LABEL`. */
-  stage: "extract" | "triage" | "locator" | "reader";
+  stage: "extract" | "triage" | "locator" | "reader" | "learning";
   ruleId?: string;
   message: string;
 }
@@ -102,7 +106,8 @@ export interface AgentFailure {
 /** Nutzlast des Callbacks aus der Sandbox an das Backend. */
 export interface SandboxResult {
   reviewId: string;
-  ruleOrigin: RuleOrigin;
+  mode: "architecture" | "learning";
+  ruleOrigin: RuleBaseOrigin;
   adrFiles: string[];
   changedFiles: string[];
   rules: Rule[];
@@ -121,6 +126,14 @@ export interface SandboxResult {
     totalTokens?: number;
     averageTokensPerCheckedRule?: number;
     averageTokensPerAdr?: number;
+    phases?: {
+      checkoutMs?: number;
+      rulebaseMs?: number;
+      extractionMs?: number;
+      triageMs?: number;
+      judgingMs?: number;
+      analysisMs?: number;
+    };
   };
 }
 

@@ -1,20 +1,18 @@
 /**
  * Schritt 2 der Pipeline: Regelbasis (Abschnitt 7.2.2, FA-3).
  *
- * Zweistufiger Rückfall: Zuerst sucht die Sandbox im geklonten Repository
- * nach projektspezifischen ADRs unter `docs/adr/` und greift andernfalls auf
- * eine organisationsweite Regelbasis zurück, die als Gruppenstandard im
- * Container mitgeliefert wird. Der Aufbau bildet die Realität in Unternehmen
- * ab, in denen abteilungsweite Basisregeln und dedizierte Vorgaben einzelner
- * Dienste nebeneinander bestehen, und sorgt vor allem dafür, dass ein neues
- * Repository ohne jede Vorkonfiguration geprüft werden kann (NFA-9).
+ * Die Sandbox sucht zuerst nach gültigen, angenommenen Projekt-ADRs unter
+ * `docs/adr/`. Nur wenn sie mindestens eines findet, ergänzt sie diese um die
+ * organisationsweiten Gruppenstandards. Ohne Projekt-ADRs wird stattdessen
+ * der Lernmodus verwendet; Gruppenstandards allein schalten keinen
+ * Architektur-Review frei.
  */
 
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { config } from "./config.js";
 import { log } from "./trace.js";
-import type { RuleOrigin } from "./types.js";
+import type { RuleBaseOrigin, RuleOrigin } from "./types.js";
 
 export interface AdrDocument {
   /** Dateiname, etwa `001-datenbank.md`. Wandert in jeden Kommentar. */
@@ -110,7 +108,8 @@ async function loadFrom(
 }
 
 export interface RuleBase {
-  origin: RuleOrigin;
+  mode: "architecture" | "learning";
+  origin: RuleBaseOrigin;
   documents: AdrDocument[];
   /** Pfade, die aus dem Suchraum genommen werden (FA-5). */
   excludedPaths: string[];
@@ -125,29 +124,35 @@ export async function loadRuleBase(): Promise<RuleBase> {
   );
 
   if (projectDocs.length > 0) {
+    const groupDocs = await loadFrom(config.groupStandardDir, "group");
+    const documents = [...projectDocs, ...groupDocs];
+    const origin = groupDocs.length > 0 ? "combined" : "project";
     log.info("rulebase_selected", {
-      origin: "project",
+      mode: "architecture",
+      origin,
       dir: config.projectAdrDir,
       documents: projectDocs.length,
+      groupDocuments: groupDocs.length,
     });
     return {
-      origin: "project",
-      documents: projectDocs,
-      excludedPaths: projectDocs
+      mode: "architecture",
+      origin,
+      documents,
+      excludedPaths: documents
         .map((doc) => doc.repoPath)
         .filter((p): p is string => Boolean(p)),
     };
   }
 
-  const groupDocs = await loadFrom(config.groupStandardDir, "group");
   log.info("rulebase_selected", {
-    origin: "group",
-    dir: config.groupStandardDir,
-    documents: groupDocs.length,
-    reason: "keine projektspezifischen ADRs gefunden",
+    mode: "learning",
+    origin: "learning",
+    projectDocuments: 0,
+    groupDocuments: 0,
+    reason: "keine gültigen projektspezifischen ADRs gefunden",
   });
 
-  // Der Gruppenstandard liegt außerhalb des geklonten Baums und ist damit
-  // ohnehin nicht Teil des Suchraums.
-  return { origin: "group", documents: groupDocs, excludedPaths: [] };
+  // Ohne Projekt-ADRs wird nicht still auf Architekturregeln zurückgefallen:
+  // der Lern-Review prüft konkrete Änderungen und erklärt mögliche Folgen.
+  return { mode: "learning", origin: "learning", documents: [], excludedPaths: [] };
 }

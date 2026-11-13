@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowUpRight, CircleAlert, FileWarning, GitMerge } from "lucide-react";
+import { ArrowUpRight, ChevronDown, CircleAlert, FileWarning, GitMerge } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { listReviews } from "@/lib/store";
@@ -12,6 +12,7 @@ const STAGE_LABEL: Record<AgentFailure["stage"], string> = {
   triage: "Vorfilter",
   locator: "Locator",
   reader: "Reader",
+  learning: "Lern-Review",
 };
 
 export default async function ErrorTrackingPage() {
@@ -65,10 +66,11 @@ export default async function ErrorTrackingPage() {
               <details className="issue-group" key={review.id}>
                 <summary className="issue-group-header">
                   <span className="mr-icon"><GitMerge size={17} /></span>
-                  <span className="issue-group-mr">
-                    <span className="issue-group-title">{review.mr.title || `Merge Request !${review.mr.mrIid}`}</span>
-                    <span className="issue-group-identity">{review.mr.projectPath} !{review.mr.mrIid} · {review.mr.sourceBranch} → {review.mr.targetBranch}</span>
-                  </span>
+                    <span className="issue-group-mr">
+                      <span className="issue-group-title">{review.mr.title || `Merge Request !${review.mr.mrIid}`}</span>
+                      <span className="issue-group-identity">{review.mr.projectPath} !{review.mr.mrIid} · {review.mr.sourceBranch} → {review.mr.targetBranch}</span>
+                    </span>
+                    <ChevronDown className="issue-group-chevron" aria-hidden="true" />
                 </summary>
                 <Link className="issue-group-gitlab-link" href={review.mr.webUrl} target="_blank" rel="noreferrer">
                   In GitLab öffnen <ArrowUpRight size={15} />

@@ -16,6 +16,7 @@ import { env } from "./env";
 import { renderPlaceholder } from "./comment";
 import { createNote, deleteNote, loadMergeRequestContext } from "./gitlab";
 import { runSandbox } from "./sandbox";
+import { writeOperationalLog } from "./operational-log";
 import {
   getReviewAfterPendingWrites,
   newReviewId,
@@ -69,6 +70,11 @@ export async function startReview(review: Review): Promise<void> {
     review.placeholderNoteId = noteId;
     review.status = "running";
   } catch (error) {
+    writeOperationalLog("application.log", {
+      event: "review_setup_failed",
+      reviewId: review.id,
+      error: String(error),
+    });
     await failReview(review.id, `Vorbereitung fehlgeschlagen: ${String(error)}`);
     return;
   }
@@ -77,6 +83,11 @@ export async function startReview(review: Review): Promise<void> {
   try {
     outcome = await runSandbox(review);
   } catch (error) {
+    writeOperationalLog("application.log", {
+      event: "sandbox_start_failed",
+      reviewId: review.id,
+      error: String(error),
+    });
     await failReview(review.id, `Sandbox konnte nicht gestartet werden: ${String(error)}`);
     return;
   }
@@ -88,7 +99,17 @@ export async function startReview(review: Review): Promise<void> {
   if (current?.status === "running") {
     const reason = outcome.timedOut
       ? `Zeitlimit von ${env.sandboxTimeoutSeconds}s überschritten.`
-      : `Sandbox endete mit Code ${outcome.exitCode} ohne Ergebnis zu melden.`;
+      : [
+          `Sandbox endete mit Code ${outcome.exitCode} ohne Ergebnis zu melden.`,
+          outcome.runtimeError,
+        ]
+          .filter(Boolean)
+          .join(" ");
+    writeOperationalLog("application.log", {
+      event: "review_failed_without_callback",
+      reviewId: review.id,
+      error: reason,
+    });
     await failReview(review.id, reason);
   }
 }
