@@ -22,8 +22,9 @@ services:
       SANDBOX_IMAGE: localhost/adr-review-agent:latest
       SANDBOX_NETWORK: adr-review
       # Reviews laufen im selben Podman-Netz und erreichen die App direkt,
-      # unabhängig von Host-Portweiterleitung oder externem DNS.
-      CALLBACK_BASE_URL: http://app:5000
+      # unabhängig von Host-Portweiterleitung oder externem DNS. Die öffentliche
+      # CALLBACK_BASE_URL aus .env bleibt dadurch für GitLab-Links verfügbar.
+      SANDBOX_CALLBACK_BASE_URL: http://app:5000
       DATA_DIR: /app/data
       PORT: 5000
       CONTAINER_HOST: unix:///run/podman/podman.sock

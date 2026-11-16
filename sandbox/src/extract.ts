@@ -26,6 +26,7 @@
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import { mapWithConcurrency } from "./concurrency.js";
+import { trackProgress } from "./progress.js";
 import { complete, parseJsonObject } from "./llm.js";
 import type { AdrDocument } from "./rulebase.js";
 import { log, withUsageScope } from "./trace.js";
@@ -194,10 +195,17 @@ export async function extractRules(
   documents: AdrDocument[],
   changedFiles: string[],
 ): Promise<ExtractionResult> {
+  const advance = trackProgress("extraction", documents.length);
   const results = await mapWithConcurrency(
     documents,
     config.concurrency.extraction,
-    (document) => extractDocument(document, changedFiles),
+    async (document) => {
+      try {
+        return await extractDocument(document, changedFiles);
+      } finally {
+        advance();
+      }
+    },
   );
 
   return {

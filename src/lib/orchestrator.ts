@@ -11,7 +11,7 @@
  * andernfalls als fehlgeschlagen werten.
  */
 
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { env } from "./env";
 import { renderPlaceholder } from "./comment";
 import { createNote, deleteNote, loadMergeRequestContext } from "./gitlab";
@@ -138,9 +138,4 @@ export async function failReview(id: string, message: string): Promise<void> {
     r.error = message;
   });
   if (review) await removePlaceholder(review);
-}
-
-/** Erzeugt eine ID für einen Feedback-Eintrag. */
-export function newFeedbackId(): string {
-  return randomUUID();
 }

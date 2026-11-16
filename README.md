@@ -37,16 +37,23 @@ Die Prüfung läuft in diesen Schritten:
    relevant erscheinen; Locator und Reader suchen und bewerten Belegstellen.
    Die Urteile lauten `C` (eingehalten), `NC` (nicht konform/verletzt) oder
    `CIA` (nicht entscheidbar).
-3. Im Lernmodus bewertet das Modell den Diff im Zusammenhang mit dem ganzen
-   ausgecheckten Repository. Es kann gezielt nach referenzierten Dateien,
-   Funktionen, Imports, Routen und API-Verträgen suchen und passende Stellen
-   lesen. Jeder Hinweis muss auf eine hinzugefügte Diff-Zeile zurückführbar sein;
-   Repo-übergreifende Aussagen müssen zusätzlich gelesene Belegstellen nennen.
-    Hinweise erklären eine mögliche Folge und enthalten einen konkreten,
-    direkt umsetzbaren Verbesserungsvorschlag; bei Bedarf nennen sie auch einen
-    passenden Regressionstest. Das Lernbudget ist höher als das des
-    Architekturmodus. Reine Stilpräferenzen ohne konkreten Nachteil werden
-    nicht gemeldet.
+3. Im Lernmodus wird der Diff an Hunkgrenzen und bei großen Hunks an Zeilengrenzen
+   aufgeteilt. Jeder Teil wird mit eigenem Modellkontext und Suchbudget im
+   Zusammenhang mit dem **gesamten ausgecheckten Repository** untersucht. Die
+   Werkzeuge können auch unveränderte Dateien, Aufrufer, Imports, Routen,
+   API-Verträge, Tests und Konfiguration lesen. Danach prüft ein eigener
+   Integrationsdurchlauf dateiübergreifende Verbindungen anhand kompakter
+   Teilberichte und gezielt nachgeladener Originalstellen. Gesammelte Kandidaten
+   werden einzeln gegen den Originalcode verifiziert, einschließlich einer Suche
+   nach Gegenbelegen. Erst nach der ursachenbasierten Dublettenprüfung werden
+   bestätigte Befunde zu Kommentaren ausformuliert. Jeder Hinweis muss auf eine
+   hinzugefügte Diff-Zeile zurückführbar sein; die Verifikation muss die betroffene
+   Stelle und erforderliche repo-übergreifende Belege tatsächlich gelesen haben.
+   Hinweise erklären eine mögliche Folge und enthalten einen konkreten,
+   direkt umsetzbaren Verbesserungsvorschlag; bei Bedarf nennen sie auch einen
+   passenden Regressionstest. Reine Stilpräferenzen ohne konkreten Nachteil werden
+   nicht gemeldet. Fehler einzelner Analysen werden separat erfasst; erfolgreiche
+   Teilergebnisse bleiben für die folgenden Phasen erhalten.
 4. Im Architekturmodus werden `NC`-Befunde nach ADR gruppiert. Im Lernmodus
     werden konkrete Hinweise mit möglicher Folge und Verbesserungsvorschlag
     einzeln veröffentlicht; die Kommentare sind ausdrücklich
@@ -87,12 +94,14 @@ systemctl --user enable --now podman.socket
 ```
 
 Die Compose-Datei verwendet den rootless Socket unter
-`$XDG_RUNTIME_DIR/podman/podman.sock`. Für Compose setzt die Datei den
-Sandbox-Callback bewusst auf `http://app:5000` (und überschreibt damit den
-Wert aus `.env`): Die App und jede Review-Sandbox
+`$XDG_RUNTIME_DIR/podman/podman.sock`. Für Compose setzt die Datei
+`SANDBOX_CALLBACK_BASE_URL` auf `http://app:5000`: Die App und jede Review-Sandbox
 verwenden ein gemeinsames, benanntes Podman-Netzwerk (`adr-review`). So läuft
 der Callback intern und ist unabhängig von öffentlichem DNS, VM-Port und
-Portweiterleitung. Starte und baue alles als derselbe
+Portweiterleitung. Für Links in GitLab-Kommentaren verwendet die App
+`PUBLIC_BASE_URL` oder, wenn dieser Wert fehlt bzw. leer ist, den
+Wert von `CALLBACK_BASE_URL` aus `.env`. Eine HTTP-URL ohne Portangabe verwendet
+Port **80**. Starte und baue alles als derselbe
 Benutzer – **ohne `sudo`** –, damit App, Sandbox-Image und Socket dieselbe
 Podman-Instanz verwenden. Trage anschließend die erforderlichen GitLab-,
 Webhook- und LLM-Werte in `.env` ein. Zum Starten:
@@ -136,6 +145,7 @@ mindestens folgende Werte ein:
 | `LLM_MODEL` | Modellname, den das Gateway erwartet |
 | `PUBLIC_BASE_URL` | Im Browser und von GitLab erreichbare Backend-URL für Webhook und Links in Kommentaren |
 | `CALLBACK_BASE_URL` | Vom Sandbox-Container erreichbare Backend-URL für Ergebnis-Callbacks |
+| `SANDBOX_CALLBACK_BASE_URL` | Optionaler Vorrang für Sandbox-Callbacks; Compose setzt hier die interne Container-Adresse |
 
 Ein Webhook-Secret lässt sich beispielsweise so erzeugen:
 
@@ -250,6 +260,12 @@ Die Seite **Monitor → Logs** ist derzeit ein Platzhalter. Die Einstellungen
 ändern aktuell nur das Farbschema der Oberfläche; GitLab-Tokens und andere
 Serverkonfiguration werden in `.env.local` verwaltet.
 
+Der Dunkelmodus wird sofort umgeschaltet und per Cookie für weitere Besuche
+gespeichert. Auch Feedback zu Befunden wird direkt auf der Detailseite gespeichert,
+ohne einen Seitenwechsel. Schlägt das Speichern fehl, erscheint eine Fehlermeldung
+an der jeweiligen Bedienfläche. Suchbegriffe filtern sofort; mit Enter werden sie
+in die URL übernommen und lassen sich damit als Link teilen.
+
 ### Betriebsprotokolle
 
 Wichtige Anwendungs- und Containerereignisse werden im Projektordner `logs/`
@@ -260,6 +276,21 @@ Werkzeug-/Modellaufrufe werden nicht in diese Dateien geschrieben. Jede Datei
 wird bei 1 MiB rotiert; zusätzlich bleibt jeweils höchstens eine ältere Datei
 mit der Endung `.1` erhalten. Zugangsdaten werden vor dem Schreiben maskiert,
 und Logdateien sind von Git ausgeschlossen.
+
+### Lernreview-Budgets
+
+`LEARNING_CHUNK_BYTES` begrenzt die Größe eines annotierten Diffteils (Standard:
+32.000 Bytes, maximal 48.000). Große MRs werden auf mehrere Einheiten verteilt,
+statt ab einer globalen Diffgröße abgebrochen zu werden. Eine einzelne Zeile,
+die bereits das Teilbudget überschreitet, wird als ungeprüfte Einheit gemeldet.
+`LEARNING_CONCURRENCY` begrenzt gleichzeitig laufende Lernanalysen (Standard: 3).
+`LEARNING_BUDGET_SEARCH_ROUNDS` und `LEARNING_BUDGET_FILE_READS` gelten jeweils pro
+Sammel-, Integrations- oder Verifikationsaufgabe. `LEARNING_MAX_FINDINGS` begrenzt
+die Kandidaten pro Sammel-/Integrationspaket (Standard: 20); veröffentlicht werden
+die daraus verifizierten, eigenständigen Befunde. Die Gesamtkosten wachsen mit
+Diffumfang und Kandidatenzahl; das Sandbox-Zeitlimit gilt weiterhin für den ganzen Lauf.
+Die bisherige Variable `LEARNING_MAX_PATCH_BYTES` wird als Fallback für die
+Teilgröße berücksichtigt, wenn `LEARNING_CHUNK_BYTES` nicht gesetzt ist.
 
 ## Fehlerbehebung
 
@@ -297,10 +328,24 @@ und Logdateien sind von Git ausgeschlossen.
 ```bash
 npm run lint
 npm run typecheck
+npm test
 npm run build
 npm --prefix sandbox ci
 npm --prefix sandbox run build
 ```
+
+Die Browser-Regressionstests prüfen Theme-Wechsel, Navigation, Suchfilter,
+Feedback, Fortschrittsaktualisierung und API-Validierung:
+
+```bash
+npx playwright install chromium
+npm run test:e2e
+```
+
+Playwright startet einen eigenen Entwicklungsserver auf Port 3147, nutzt
+`.next-test/` als Build-Verzeichnis und ein temporäres Datenverzeichnis. Die
+Tests benötigen weder GitLab noch ein LLM-Gateway. `tests/contracts.ts` prüft
+beim Typecheck zusätzlich, dass Sandbox und Backend dasselbe Ergebnisformat nutzen.
 
 Das Sandbox-Image wird mit `npm run sandbox:build` gebaut. Es enthält den
 separaten TypeScript-Prüfkern aus `sandbox/src/` sowie die Gruppenstandards aus
@@ -315,13 +360,20 @@ separaten TypeScript-Prüfkern aus `sandbox/src/` sowie die Gruppenstandards aus
 | `src/lib/sandbox.ts` | Start und Überwachung des Podman-Containers |
 | `src/app/api/reviews/[id]/callback/` | Authentifizierter Rückweg der Prüfergebnisse |
 | `src/lib/publish.ts`, `src/lib/comment.ts` | Befunde formatieren und in GitLab veröffentlichen |
-| `src/app/` | Übersichts- und Detailseiten sowie Feedback-Formular |
+| `src/app/` | Übersichts- und Detailseiten und HTTP-Endpunkte |
+| `src/components/reviews/` | Befundkarten, Diff-Ausschnitte und Review-Kennzahlen |
+| `src/components/theme-provider.tsx`, `src/lib/theme.ts` | Gemeinsamer Theme-Zustand und Cookie-Konfiguration |
+| `src/lib/store.ts`, `src/lib/keyed-queue.ts` | Atomare JSON-Ablage und serialisierte Schreibzugriffe |
+| `src/lib/feedback.ts`, `src/lib/reviews.ts` | Feedback-Verarbeitung und kompakte Review-Ansichten |
 | `sandbox/src/checkout.ts` | Repository auschecken und Änderungssatz vorbereiten |
 | `sandbox/src/rulebase.ts` | Automatisch Architektur- und Lernmodus wählen; Regelbasen kombinieren |
-| `sandbox/src/learning.ts` | Diffgebundene, lernfreundliche Code-Hinweise erzeugen |
+| `sandbox/src/learning.ts` | Kandidaten sammeln, Integration prüfen, verifizieren, Dubletten entfernen und Kommentare formulieren |
+| `sandbox/src/learning-diff.ts`, `sandbox/src/learning-session.ts` | Diffteile mit Originalzeilen und budgetierte Repository-Sitzungen |
 | `sandbox/src/extract.ts`, `sandbox/src/triage.ts` | Regeln extrahieren und vorfiltern |
 | `sandbox/src/judge.ts`, `sandbox/src/tools.ts` | Regeln mit Locator/Reader und Werkzeugen prüfen |
+| `sandbox/src/callback.ts`, `sandbox/src/stats.ts` | Ergebnisübertragung und gemeinsame Laufstatistik |
 | `sandbox/standards/` | Mitgelieferte organisationsweite Regelbasis |
+| `tests/` | Browser- und Regressionstests sowie Prüfung des Callback-Typvertrags |
 
 ## Grenzen des Prototyps
 

@@ -1,29 +1,29 @@
-import { cookies } from "next/headers";
+"use client";
 
-export async function ThemeSettings() {
-  const storedTheme = (await cookies()).get("adr-review-theme")?.value;
-  const darkModeEnabled = storedTheme === "dark";
+import { useTheme } from "@/components/theme-provider";
+import { Switch } from "@/components/ui/switch";
+
+export function ThemeSettings() {
+  const { theme, setTheme, error } = useTheme();
+  const darkModeEnabled = theme === "dark";
 
   return (
-    <form className="theme-switch-control" action="/api/theme" method="post">
-      <input type="hidden" name="returnTo" value="/settings" />
-      <span id="dark-mode-label">Dunkelmodus</span>
-      <button
-        className="ui-switch"
-        type="submit"
-        name="theme"
-        value={darkModeEnabled ? "light" : "dark"}
-        role="switch"
-        aria-checked={darkModeEnabled}
-        aria-labelledby="dark-mode-label"
-        data-state={darkModeEnabled ? "checked" : "unchecked"}
+    <div className="settings-row">
+      <div className="settings-row-copy">
+        <label className="settings-row-title" htmlFor="dark-mode">Dunkelmodus</label>
+        <span className="settings-row-description" id="dark-mode-description">Dunkles Farbschema verwenden</span>
+        {error ? <p className="interaction-error" role="alert">{error}</p> : null}
+      </div>
+      <Switch
+        id="dark-mode"
+        aria-describedby="dark-mode-description"
+        checked={darkModeEnabled}
+        onCheckedChange={(checked) => setTheme(checked ? "dark" : "light")}
         title={darkModeEnabled ? "Zum Hellmodus wechseln" : "Zum Dunkelmodus wechseln"}
-      >
-        <span className="ui-switch-thumb" data-state={darkModeEnabled ? "checked" : "unchecked"} />
-      </button>
-      <span className="sr-only" aria-live="polite">
+      />
+      <span className="sr-only" role="status">
         {darkModeEnabled ? "Dunkelmodus ist eingeschaltet" : "Dunkelmodus ist ausgeschaltet"}
       </span>
-    </form>
+    </div>
   );
 }

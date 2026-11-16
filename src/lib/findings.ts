@@ -11,6 +11,14 @@
 
 import type { Finding, Review, Verdict } from "./types";
 
+export const VERDICT_LABEL: Record<Verdict, string> = {
+  C: "eingehalten",
+  NC: "verletzt",
+  CIA: "nicht entscheidbar",
+};
+
+export const VERDICT_ORDER: Verdict[] = ["NC", "CIA", "C"];
+
 /** Die Befunde eines Reviews; vor dem Callback ist die Liste leer. */
 export function findingsOf(review: Review): Finding[] {
   return review.result?.findings ?? [];

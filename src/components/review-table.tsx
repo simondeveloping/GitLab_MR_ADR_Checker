@@ -6,24 +6,19 @@ import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUpDown, ArrowUpRight, CircleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { findingsOf, verdictCounts } from "@/lib/findings";
+import { formatDate } from "@/lib/format";
+import { REVIEW_STATUS_LABEL, type ReviewSummary } from "@/lib/reviews";
 import type { Review } from "@/lib/types";
 
 type SortKey = "mr" | "status" | "checks" | "createdAt";
 type SortDirection = "asc" | "desc";
 
-function statusBadge(status: Review["status"]) {
-  switch (status) {
-    case "completed":
-      return <Badge variant="success">Abgeschlossen</Badge>;
-    case "failed":
-      return <Badge variant="destructive">Abgebrochen</Badge>;
-    case "running":
-      return <Badge variant="default">In Bearbeitung</Badge>;
-    default:
-      return <Badge variant="secondary">Warteschlange</Badge>;
-  }
-}
+const STATUS_VARIANT = {
+  completed: "success",
+  failed: "destructive",
+  running: "default",
+  queued: "secondary",
+} as const satisfies Record<Review["status"], string>;
 
 function SortableHeading({ label, column, current, direction, onSort }: {
   label: string;
@@ -44,10 +39,6 @@ function SortableHeading({ label, column, current, direction, onSort }: {
   );
 }
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
-}
-
 function highlightMatches(text: string, query: string): ReactNode {
   const trimmedQuery = query.trim();
   if (!trimmedQuery) return text;
@@ -59,7 +50,7 @@ function highlightMatches(text: string, query: string): ReactNode {
     : part);
 }
 
-export function ReviewTable({ reviews, highlightQuery = "" }: { reviews: Review[]; highlightQuery?: string }) {
+export function ReviewTable({ reviews, highlightQuery = "" }: { reviews: ReviewSummary[]; highlightQuery?: string }) {
   const [sortBy, setSortBy] = useState<SortKey>("createdAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
@@ -70,7 +61,7 @@ export function ReviewTable({ reviews, highlightQuery = "" }: { reviews: Review[
     } else if (sortBy === "status") {
       comparison = a.status.localeCompare(b.status, "de");
     } else if (sortBy === "checks") {
-      comparison = findingsOf(a).length - findingsOf(b).length;
+      comparison = a.checks - b.checks;
     } else {
       comparison = a.createdAt.localeCompare(b.createdAt);
     }
@@ -94,22 +85,31 @@ export function ReviewTable({ reviews, highlightQuery = "" }: { reviews: Review[
           <col className="review-column-mr" />
           <col className="review-column-status" />
           <col className="review-column-checks" />
+          <col className="review-column-mode" />
           <col className="review-column-date" />
           <col className="review-column-action" />
         </colgroup>
         <TableHeader>
           <TableRow>
-            <TableHead><SortableHeading label="Merge Request" column="mr" current={sortBy} direction={sortDirection} onSort={toggleSort} /></TableHead>
-            <TableHead><SortableHeading label="Status" column="status" current={sortBy} direction={sortDirection} onSort={toggleSort} /></TableHead>
-            <TableHead><SortableHeading label="Regeln geprüft" column="checks" current={sortBy} direction={sortDirection} onSort={toggleSort} /></TableHead>
-            <TableHead><SortableHeading label="Erstellt" column="createdAt" current={sortBy} direction={sortDirection} onSort={toggleSort} /></TableHead>
+            {([
+              ["mr", "Merge Request"],
+              ["status", "Status"],
+              ["checks", "Regeln geprüft"],
+            ] as const).map(([column, label]) => (
+              <TableHead key={column} aria-sort={sortBy === column ? sortDirection === "asc" ? "ascending" : "descending" : "none"}>
+                <SortableHeading label={label} column={column} current={sortBy} direction={sortDirection} onSort={toggleSort} />
+              </TableHead>
+            ))}
+            <TableHead>Modus</TableHead>
+            <TableHead aria-sort={sortBy === "createdAt" ? sortDirection === "asc" ? "ascending" : "descending" : "none"}>
+              <SortableHeading label="Erstellt" column="createdAt" current={sortBy} direction={sortDirection} onSort={toggleSort} />
+            </TableHead>
             <TableHead><span className="sr-only">Öffnen</span></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {sortedReviews.map((review) => {
-            const findings = findingsOf(review);
-            const counts = verdictCounts(findings);
+            const counts = review.verdicts;
             return (
               <TableRow key={review.id}>
                 <TableCell>
@@ -118,14 +118,15 @@ export function ReviewTable({ reviews, highlightQuery = "" }: { reviews: Review[
                     <Link className="mr-title" href={`/reviews/${review.id}`} title={review.mr.title}>{highlightMatches(review.mr.title, highlightQuery)} <span className="mr-number">{highlightMatches(`!${review.mr.mrIid}`, highlightQuery)}</span></Link>
                   </div>
                 </TableCell>
-                <TableCell><div className="status-cell">{statusBadge(review.status)}{review.error ? <span className="row-error" title={review.error}><CircleAlert size={13} /></span> : null}</div></TableCell>
+                <TableCell><div className="status-cell"><Badge variant={STATUS_VARIANT[review.status]}>{REVIEW_STATUS_LABEL[review.status]}</Badge>{review.error ? <span className="row-error" title={review.error}><CircleAlert size={13} /></span> : null}</div></TableCell>
                 <TableCell>
-                  {review.result ? (
-                    <div className="checks-cell"><span>{findings.length}</span><span className="check-breakdown"><span className={`count-nc${counts.NC === 0 ? " is-clear" : " is-violation"}`}>{counts.NC} Verstöße</span></span></div>
+                  {review.hasResult ? (
+                    <div className="checks-cell"><span>{review.checks}</span><span className="check-breakdown"><span className={`count-nc${counts.NC === 0 ? " is-clear" : " is-violation"}`}>{counts.NC} Verstöße</span></span></div>
                   ) : <span className="muted-dash">—</span>}
                 </TableCell>
+                <TableCell className="mode-cell">{review.mode === "learning" ? "Lernmodus" : review.mode === "architecture" ? "ADR-Check" : <span className="muted-dash">—</span>}</TableCell>
                 <TableCell className="date-cell">{formatDate(review.createdAt)}</TableCell>
-                <TableCell><Link className="row-open" href={`/reviews/${review.id}`} aria-label={`Review ${review.mr.title} öffnen`}><ArrowUpRight size={16} /></Link></TableCell>
+                <TableCell><a className="row-open" href={review.mr.webUrl} target="_blank" rel="noreferrer" aria-label={`${review.mr.title} in GitLab öffnen`} title="In GitLab öffnen"><ArrowUpRight size={16} /></a></TableCell>
               </TableRow>
             );
           })}

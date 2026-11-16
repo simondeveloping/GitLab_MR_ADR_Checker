@@ -24,8 +24,11 @@
  */
 
 import { config } from "./config.js";
+import { sendCallback } from "./callback.js";
+import { buildStats } from "./stats.js";
 import { checkout } from "./checkout.js";
 import { mapWithConcurrency } from "./concurrency.js";
+import { trackProgress } from "./progress.js";
 import { extractRules } from "./extract.js";
 import { judgeRule } from "./judge.js";
 import { reviewForLearning } from "./learning.js";
@@ -34,36 +37,6 @@ import { setExcludedAdrPaths } from "./tools.js";
 import { counters, log } from "./trace.js";
 import { triage } from "./triage.js";
 import type { AgentFailure, Finding, SandboxResult } from "./types.js";
-
-async function sendCallback(result: SandboxResult): Promise<void> {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    if (attempt > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
-    }
-    try {
-      const response = await fetch(config.callbackUrl, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.callbackToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(result),
-        signal: AbortSignal.timeout(120_000),
-      });
-      if (response.ok) {
-        log.info("callback_sent", { status: response.status });
-        return;
-      }
-      log.warn("callback_rejected", {
-        status: response.status,
-        body: (await response.text()).slice(0, 500),
-      });
-    } catch (error) {
-      log.warn("callback_failed", { attempt, error: String(error) });
-    }
-  }
-  throw new Error("Callback an das Backend endgültig fehlgeschlagen.");
-}
 
 async function main(): Promise<void> {
   const startedAt = new Date();
@@ -105,7 +78,6 @@ async function main(): Promise<void> {
       : { findings: [], failures: [] };
     const analysisMs = Math.round(performance.now() - analysisStartedAt);
     failures.push(...learning.failures);
-    const finishedAt = new Date();
     const result: SandboxResult = {
       reviewId: config.reviewId,
       mode: "learning",
@@ -116,19 +88,7 @@ async function main(): Promise<void> {
       droppedRules: [],
       findings: learning.findings,
       failures,
-      stats: {
-        startedAt: startedAt.toISOString(),
-        finishedAt: finishedAt.toISOString(),
-        durationMs: finishedAt.getTime() - startedAt.getTime(),
-        modelCalls: counters.modelCalls,
-        toolCalls: counters.toolCalls,
-        promptTokens: counters.promptTokens,
-        completionTokens: counters.completionTokens,
-        totalTokens: counters.totalTokens,
-        phases: { checkoutMs, rulebaseMs, analysisMs },
-        averageTokensPerCheckedRule:
-          learning.findings.length > 0 ? counters.totalTokens / learning.findings.length : 0,
-      },
+      stats: buildStats(startedAt, learning.findings.length, { checkoutMs, rulebaseMs, analysisMs }),
     };
     log.info("run_summary", {
       mode: "learning",
@@ -165,6 +125,7 @@ async function main(): Promise<void> {
 
   // 5 Prüfung je Regel
   const judgingStartedAt = performance.now();
+  const advanceJudging = trackProgress("judging", triaged.selected.length);
   const judged = await mapWithConcurrency(
     triaged.selected,
     config.concurrency.judging,
@@ -174,14 +135,16 @@ async function main(): Promise<void> {
         of: triaged.selected.length,
         ruleId: rule.id,
       });
-      return judgeRule(rule, relevantFiles);
+      try {
+        return await judgeRule(rule, relevantFiles);
+      } finally {
+        advanceJudging();
+      }
     },
   );
   const findings: Finding[] = judged.map((outcome) => outcome.finding);
   failures.push(...judged.flatMap((outcome) => outcome.failures));
   const judgingMs = Math.round(performance.now() - judgingStartedAt);
-
-  const finishedAt = new Date();
 
   // 6 Befunde bündeln und zurückmelden
   const result: SandboxResult = {
@@ -195,21 +158,12 @@ async function main(): Promise<void> {
     findings,
     failures,
     adrTokenUsage: extraction.adrTokenUsage,
-    stats: {
-      startedAt: startedAt.toISOString(),
-      finishedAt: finishedAt.toISOString(),
-      durationMs: finishedAt.getTime() - startedAt.getTime(),
-      modelCalls: counters.modelCalls,
-      toolCalls: counters.toolCalls,
-      promptTokens: counters.promptTokens,
-      completionTokens: counters.completionTokens,
-      totalTokens: counters.totalTokens,
-      phases: { checkoutMs, rulebaseMs, extractionMs, triageMs, judgingMs },
-      averageTokensPerCheckedRule:
-        findings.length > 0 ? counters.totalTokens / findings.length : 0,
-      averageTokensPerAdr:
-        ruleBase.documents.length > 0 ? counters.totalTokens / ruleBase.documents.length : 0,
-    },
+    stats: buildStats(
+      startedAt,
+      findings.length,
+      { checkoutMs, rulebaseMs, extractionMs, triageMs, judgingMs },
+      ruleBase.documents.length,
+    ),
   };
 
   log.info("run_summary", {

@@ -1,4 +1,4 @@
-"use client";
+import { compactFormat } from "@/lib/format";
 
 export interface DashboardDay {
   date: string;
@@ -16,17 +16,13 @@ const right = 12;
 const top = 22;
 const bottom = 34;
 
-function formatNumber(value: number): string {
-  return new Intl.NumberFormat("de-DE", { notation: "compact", maximumFractionDigits: 1 }).format(value);
-}
-
 function DashboardAreaChart({
   data,
   series,
   ariaLabel,
 }: {
   data: DashboardDay[];
-  series: Array<{ key: keyof DashboardDay; label: string; color: string }>;
+  series: Array<{ key: "reviews" | "failed" | "promptTokens" | "completionTokens"; label: string; color: string }>;
   ariaLabel: string;
 }) {
   const plotWidth = chartWidth - left - right;
@@ -49,7 +45,7 @@ function DashboardAreaChart({
         })}
       </svg>
       <div className="dashboard-chart-y-labels" aria-hidden="true">
-        {ticks.map((tick) => <span key={tick} style={{ top: `${(y(tick) / chartHeight) * 100}%` }}>{formatNumber(tick)}</span>)}
+        {ticks.map((tick) => <span key={tick} style={{ top: `${(y(tick) / chartHeight) * 100}%` }}>{compactFormat.format(tick)}</span>)}
       </div>
       <div className="dashboard-chart-x-labels" aria-hidden="true">
         {data.map((day, index) => index % 5 === 0 || index === data.length - 1 ? (

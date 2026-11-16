@@ -189,7 +189,7 @@ export interface Review {
     kind: "inline" | "fallback";
     discussionId?: string;
   }>;
-  /** Sammelkommentar am Merge Request, der auf die Detailseite verweist. */
+  /** Sammelkommentar am Merge Request mit der Anzahl der Verstöße. */
   summaryDiscussionId?: string;
   feedback: FeedbackEntry[];
   error?: string;
@@ -201,6 +201,8 @@ export interface Review {
     updatedAt: string;
     currentRule?: number;
     totalRules?: number;
+    completedUnits?: number;
+    totalUnits?: number;
   };
   sandboxStartedAt?: string;
   sandboxHeartbeatAt?: string;

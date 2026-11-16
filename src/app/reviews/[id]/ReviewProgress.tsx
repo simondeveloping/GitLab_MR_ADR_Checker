@@ -2,17 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-
-interface ProgressSnapshot {
-  status: "queued" | "running" | "completed" | "failed";
-  progress?: {
-    message: string;
-    percent: number;
-    updatedAt?: string;
-    currentRule?: number;
-    totalRules?: number;
-  };
-}
+import { isActiveReview, type ProgressSnapshot } from "@/lib/reviews";
 
 export default function ReviewProgress({
   reviewId,
@@ -23,44 +13,79 @@ export default function ReviewProgress({
 }) {
   const [snapshot, setSnapshot] = useState(initial);
   const router = useRouter();
-  const active = snapshot.status === "queued" || snapshot.status === "running";
+  const active = isActiveReview(snapshot.status);
 
   useEffect(() => {
     if (!active) return;
     let cancelled = false;
     let timer: number | undefined;
-    let requestInFlight = false;
+    let stream: EventSource | undefined;
+    let polling = false;
+    let pollController: AbortController | undefined;
+    let connectionTimer: number | undefined;
+    const url = `/api/reviews/${encodeURIComponent(reviewId)}/progress`;
+    const stopPolling = () => {
+      polling = false;
+      pollController?.abort();
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+    const receive = (next: ProgressSnapshot) => {
+      if (cancelled) return;
+      setSnapshot(next);
+      if (!isActiveReview(next.status)) {
+        cancelled = true;
+        stream?.close();
+        stopPolling();
+        router.refresh();
+      }
+    };
     const refresh = async () => {
-      if (requestInFlight || cancelled) return;
-      requestInFlight = true;
+      const controller = new AbortController();
+      pollController = controller;
       try {
-        const response = await fetch(
-          `/api/reviews/${reviewId}/progress?t=${Date.now()}`,
-          {
+        const response = await fetch(url, {
           cache: "no-store",
-            headers: { "Cache-Control": "no-cache" },
-          },
-        );
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]),
+        });
         if (response.ok) {
           const next = (await response.json()) as ProgressSnapshot;
-          if (!cancelled) {
-            setSnapshot(next);
-            if (next.status !== "queued" && next.status !== "running") {
-              router.refresh();
-            }
-          }
+          if (polling && !controller.signal.aborted) receive(next);
         }
       } catch {
         // Die nächste Abfrage versucht es erneut; der Review läuft unabhängig weiter.
       } finally {
-        requestInFlight = false;
-        if (!cancelled) timer = window.setTimeout(refresh, 2000);
+        if (!cancelled && polling && !controller.signal.aborted) timer = window.setTimeout(refresh, 1000);
       }
     };
-    void refresh();
+    const startPolling = () => {
+      if (polling || cancelled) return;
+      polling = true;
+      void refresh();
+    };
+    if (typeof EventSource === "undefined") {
+      startPolling();
+    } else {
+      stream = new EventSource(url);
+      // Auch bei einem Proxy, der Streaming puffert, bleibt der Fortschritt aktuell.
+      connectionTimer = window.setTimeout(startPolling, 5000);
+      stream.onmessage = (event) => {
+        try {
+          const next = JSON.parse(event.data) as ProgressSnapshot;
+          window.clearTimeout(connectionTimer);
+          stopPolling();
+          receive(next);
+        } catch {
+          startPolling();
+        }
+      };
+      // EventSource versucht selbst die Wiederverbindung; bis dahin JSON-Fallback.
+      stream.onerror = startPolling;
+    }
     return () => {
       cancelled = true;
-      if (timer !== undefined) window.clearTimeout(timer);
+      stream?.close();
+      window.clearTimeout(connectionTimer);
+      stopPolling();
     };
   }, [active, reviewId, router]);
 
@@ -78,7 +103,7 @@ export default function ReviewProgress({
           <strong>Review abgeschlossen</strong>
           <span>100 %</span>
         </div>
-        <div className="progress-track" aria-label="Fortschritt: 100 Prozent">
+        <div className="progress-track" role="progressbar" aria-label="Review-Fortschritt" aria-valuemin={0} aria-valuemax={100} aria-valuenow={100}>
           <div className="progress-fill" style={{ width: "100%" }} />
         </div>
       </div>
@@ -90,7 +115,7 @@ export default function ReviewProgress({
     <div className="card progress-card" role="status" aria-live="polite">
       <div className="progress-heading">
         <strong>{snapshot.progress?.message ?? "Review wird vorbereitet …"}</strong>
-        <span>{percent} %</span>
+        <span title="Geschätzter Gesamtfortschritt anhand erledigter Teilschritte">ca. {percent} %</span>
       </div>
       <div
         className="progress-track"
@@ -99,9 +124,11 @@ export default function ReviewProgress({
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={percent}
+        aria-valuetext={`Geschätzt ${percent} Prozent. ${snapshot.progress?.message ?? "Review wird vorbereitet"}`}
       >
         <div className="progress-fill" style={{ width: `${percent}%` }} />
       </div>
+      <p className="meta">Gesamtfortschritt geschätzt · Einzelne KI-Prüfungen können unterschiedlich lange dauern.</p>
     </div>
   );
 }

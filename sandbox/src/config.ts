@@ -72,12 +72,13 @@ export const config = {
     refetches: number("BUDGET_REFETCHES", 2),
   },
 
-  /** Eigene, groessere Budgets fuer den breiten Lern-Review. */
+  /** Budgets je Diffteil, Integrationspaket bzw. Kandidaten-Verifikation. */
   learningBudget: {
     searchRounds: number("LEARNING_BUDGET_SEARCH_ROUNDS", 24),
     fileReads: number("LEARNING_BUDGET_FILE_READS", 16),
     maxFindings: number("LEARNING_MAX_FINDINGS", 20),
-    maxPatchBytes: number("LEARNING_MAX_PATCH_BYTES", 200_000),
+    // Altvariable dient nur noch als Fallback fuer die Teilgroesse, nie als MR-Abbruchgrenze.
+    chunkBytes: Math.min(48_000, Math.floor(number("LEARNING_CHUNK_BYTES", number("LEARNING_MAX_PATCH_BYTES", 32_000)))),
   },
 
   /**
@@ -86,8 +87,9 @@ export const config = {
    * zu überlasten.
    */
   concurrency: {
-    extraction: number("EXTRACTION_CONCURRENCY", 3),
-    judging: number("JUDGING_CONCURRENCY", 3),
+    learning: Math.max(1, Math.floor(number("LEARNING_CONCURRENCY", 3))),
+    extraction: Math.max(1, Math.floor(number("EXTRACTION_CONCURRENCY", 3))),
+    judging: Math.max(1, Math.floor(number("JUDGING_CONCURRENCY", 3))),
   },
 
   /** Arbeitsverzeichnis im Container; verschwindet mit ihm. */

@@ -21,6 +21,8 @@
  */
 
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import { join, relative, resolve, sep } from "node:path";
 import { config } from "./config.js";
 import type { ToolCallTrace } from "./types.js";
@@ -171,6 +173,19 @@ async function walk(dir: string, budget: { left: number }): Promise<string[]> {
 export interface ToolContext {
   role: "locator" | "reader";
   trace: ToolCallTrace[];
+  /** Lernreview: auch grosse Quelldateien und den Originaldiff ausschnittweise lesen. */
+  largeTextFiles?: boolean;
+}
+
+async function* sourceLines(path: string): AsyncGenerator<string> {
+  const stream = createReadStream(path, { encoding: "utf8" });
+  const lines = createInterface({ input: stream, crlfDelay: Infinity });
+  try {
+    for await (const line of lines) yield line;
+  } finally {
+    lines.close();
+    stream.destroy();
+  }
 }
 
 function record(
@@ -257,7 +272,22 @@ export async function grep(
     for (const rel of candidates) {
       if (matches.length >= MAX_GREP_MATCHES) break;
       const fileInfo = await stat(join(ROOT, rel)).catch(() => null);
-      if (!fileInfo || fileInfo.size > MAX_FILE_BYTES) continue;
+      if (!fileInfo || (!ctx.largeTextFiles && fileInfo.size > MAX_FILE_BYTES)) continue;
+
+      if (ctx.largeTextFiles && fileInfo.size > MAX_FILE_BYTES) {
+        if (isExcluded(rel)) continue;
+        try {
+          let lineNumber = 0;
+          for await (const line of sourceLines(join(ROOT, rel))) {
+            lineNumber += 1;
+            if (regex.test(line)) matches.push(`${rel}:${lineNumber}: ${line.trim().slice(0, 240)}`);
+            if (matches.length >= MAX_GREP_MATCHES) break;
+          }
+        } catch {
+          // Unlesbare Dateien wie bei kleinen Dateien ueberspringen.
+        }
+        continue;
+      }
 
       let content: string;
       try {
@@ -317,6 +347,19 @@ export async function readFileTool(
       return `Datei existiert nicht: ${args.path}`;
     }
     if (info.size > MAX_FILE_BYTES) {
+      if (ctx.largeTextFiles) {
+        const start = Math.max(1, Math.floor(args.start_line ?? 1));
+        const end = Math.min(Math.max(start, Math.floor(args.end_line ?? start + MAX_READ_LINES - 1)), start + MAX_READ_LINES - 1);
+        const numbered: string[] = [];
+        let lineNumber = 0;
+        for await (const line of sourceLines(absolute)) {
+          lineNumber += 1;
+          if (lineNumber >= start) numbered.push(`${lineNumber}\t${line}`);
+          if (lineNumber >= end) break;
+        }
+        record(ctx, "read_file", args, numbered.length, startedAt);
+        return `${rel} (Zeilen ${start}-${lineNumber} von unbekannt):\n${numbered.join("\n")}`;
+      }
       record(ctx, "read_file", args, 0, startedAt);
       return `Datei zu gross (${info.size} Bytes): ${args.path}`;
     }

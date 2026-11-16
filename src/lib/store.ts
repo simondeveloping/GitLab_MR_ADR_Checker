@@ -9,9 +9,11 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { watch } from "node:fs";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { env } from "./env";
+import { createKeyedQueue } from "./keyed-queue";
 import type { Review } from "./types";
 
 function reviewsDir(): string {
@@ -22,34 +24,37 @@ function reviewPath(id: string): string {
   return join(reviewsDir(), `${id}.json`);
 }
 
-/** Verhindert, dass zwei gleichzeitige Updates einander verlieren. */
-const locks = new Map<string, Promise<unknown>>();
-
-function withLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
-  const previous = locks.get(id) ?? Promise.resolve();
-  const next = previous.then(fn, fn);
-  locks.set(
-    id,
-    next.catch(() => undefined),
-  );
-  return next;
+function isReviewId(id: string): boolean {
+  return /^[a-zA-Z0-9_-]+$/.test(id);
 }
+
+const withLock = createKeyedQueue();
 
 export function newReviewId(): string {
   return randomUUID();
 }
 
-export async function saveReview(review: Review): Promise<void> {
+async function writeReview(review: Review): Promise<void> {
+  if (!isReviewId(review.id)) throw new Error("Ungültige Review-ID.");
   await mkdir(reviewsDir(), { recursive: true });
   const target = reviewPath(review.id);
   // Erst in eine Temporärdatei, dann umbenennen: ein abgebrochener Schreibvorgang
   // hinterlässt so kein halbes JSON.
-  const tmp = `${target}.${process.pid}.tmp`;
-  await writeFile(tmp, JSON.stringify(review, null, 2), "utf8");
-  await rename(tmp, target);
+  const tmp = `${target}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmp, JSON.stringify(review, null, 2), "utf8");
+    await rename(tmp, target);
+  } finally {
+    await rm(tmp, { force: true });
+  }
+}
+
+export function saveReview(review: Review): Promise<void> {
+  return withLock(review.id, () => writeReview(review));
 }
 
 export async function getReview(id: string): Promise<Review | null> {
+  if (!isReviewId(id)) return null;
   try {
     const raw = await readFile(reviewPath(id), "utf8");
     return JSON.parse(raw) as Review;
@@ -57,6 +62,22 @@ export async function getReview(id: string): Promise<Review | null> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
+}
+
+/** Verzeichnis beobachten: der Store ersetzt Dateien atomar per rename.
+ * Funktioniert auch zwischen getrennten Next.js-Workern und bei externen Updates.
+ */
+export function watchReview(
+  id: string,
+  onChange: () => void,
+  onError: (error: Error) => void,
+): () => void {
+  if (!isReviewId(id)) throw new Error("Ungültige Review-ID.");
+  const watcher = watch(reviewsDir(), { persistent: false }, (_event, filename) => {
+    if (filename === null || filename.toString() === `${id}.json`) onChange();
+  });
+  watcher.on("error", onError);
+  return () => watcher.close();
 }
 
 /**
@@ -74,18 +95,19 @@ export function getReviewAfterPendingWrites(
 
 /**
  * Lädt den Review, wendet `mutate` an und schreibt ihn zurück. Gibt `null`
- * zurück, wenn es den Review nicht gibt.
+ * zurück, wenn es den Review nicht gibt. `false` überspringt das Schreiben,
+ * wenn die Mutation anhand des aktuellen Datensatzes nicht anwendbar ist.
  */
 export function updateReview(
   id: string,
-  mutate: (review: Review) => void | Promise<void>,
+  mutate: (review: Review) => void | false | Promise<void | false>,
 ): Promise<Review | null> {
   return withLock(id, async () => {
     const review = await getReview(id);
     if (!review) return null;
-    await mutate(review);
+    if (await mutate(review) === false) return review;
     review.updatedAt = new Date().toISOString();
-    await saveReview(review);
+    await writeReview(review);
     return review;
   });
 }

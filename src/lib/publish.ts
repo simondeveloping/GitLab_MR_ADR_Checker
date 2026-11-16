@@ -9,7 +9,6 @@
  * Request zurück.
  */
 
-import { env } from "./env";
 import {
   createFallbackComment,
   createInlineDiscussion,
@@ -102,7 +101,7 @@ function findCommentablePosition(
 export interface PublishResult {
   published: Review["publishedComments"];
   reported: number;
-  /** Diskussion des abschließenden Sammelkommentars mit dem Link zum Bericht. */
+  /** Diskussion des abschließenden Sammelkommentars. */
   summaryDiscussionId?: string;
 }
 
@@ -112,13 +111,10 @@ export interface PublishResult {
  * der Detailseite des Backends sichtbar, sodass der Merge Request frei von
  * Rauschen bleibt (NFA-10).
  *
- * Damit diese Zurückhaltung die Nachvollziehbarkeit nicht aufhebt, schließt
- * jeder Lauf mit genau einem Sammelkommentar ab. Er nennt die Verteilung der
- * Urteile und verlinkt die Detailseite, über die auch die nicht gemeldeten
- * Regeln erreichbar bleiben (NFA-3).
+ * Jeder Architekturlauf schließt mit einem Sammelkommentar ab, der nur die
+ * Anzahl der Verstöße nennt.
  */
 export async function publishFindings(review: Review): Promise<PublishResult> {
-  const baseUrl = env.publicBaseUrl;
   const violations = violatedRules(review);
   const learning = review.result?.mode === "learning";
 
@@ -128,7 +124,7 @@ export async function publishFindings(review: Review): Promise<PublishResult> {
     const summaryDiscussionId = await createFallbackComment(
       review.mr.projectId,
       review.mr.mrIid,
-      renderSummary(review, baseUrl),
+      renderSummary(review),
       review.mr.repoUrl,
     );
     return { published: [], reported: 0, summaryDiscussionId };
@@ -142,7 +138,7 @@ export async function publishFindings(review: Review): Promise<PublishResult> {
   const published: NonNullable<Review["publishedComments"]> = [];
 
   for (const [, findings] of groupByAdr(violations)) {
-    const body = renderComment(review, findings, baseUrl);
+    const body = renderComment(findings);
 
     // Die Position richtet sich nach dem ersten Befund der Gruppe, der sich
     // überhaupt einer geänderten Zeile zuordnen lässt.
@@ -189,13 +185,13 @@ export async function publishFindings(review: Review): Promise<PublishResult> {
   }
 
   // Lernmodus meldet ausschließlich einzelne Kommentare mit Verbesserung;
-  // Architekturprüfungen erhalten zusätzlich ihren zusammenfassenden Bericht.
+  // Architekturprüfungen erhalten zusätzlich einen kurzen Sammelkommentar.
   const summaryDiscussionId = learning
     ? undefined
     : await createFallbackComment(
         review.mr.projectId,
         review.mr.mrIid,
-        renderSummary(review, baseUrl),
+        renderSummary(review),
         review.mr.repoUrl,
       );
 

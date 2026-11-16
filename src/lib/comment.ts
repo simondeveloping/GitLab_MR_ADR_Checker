@@ -66,11 +66,7 @@ export function groupByAdr(findings: Finding[]): Map<string, Finding[]> {
  * offizieller Dokumentation: Wer den Befund nicht versteht, findet die
  * Begründung im ADR, aus dem die Regel stammt (NFA-11).
  */
-export function renderComment(
-  review: Review,
-  findings: Finding[],
-  baseUrl: string,
-): string {
+export function renderComment(findings: Finding[]): string {
   const first = findings[0];
   if (first.rule.origin === "learning") {
     const lines = [`**${first.rule.text}**`, "", first.rationale.trim()];
@@ -109,11 +105,6 @@ export function renderComment(
       }
       lines.push("");
     }
-
-    lines.push(
-      `[Vollständigen Bericht öffnen](${reviewUrl(baseUrl, review.id, finding.id)})`,
-    );
-    lines.push("");
   }
 
   return lines.join("\n");
@@ -132,44 +123,12 @@ export function renderPlaceholder(reviewId: string, baseUrl: string): string {
  * wenn nichts zu melden war: Ohne sie wäre ein fehlgeschlagener Lauf von
  * einem sauberen nicht zu unterscheiden.
  *
- * Der Kommentar ist zugleich der einzige Einstiegspunkt in die Detailseite.
- * Am Merge Request selbst erscheinen nur Verstöße (NFA-10); die
- * eingehaltenen und die nicht entscheidbaren Regeln bleiben dort ungenannt,
- * wären ohne diesen Link aber auch nicht mehr auffindbar. Die Zählung nennt
- * sie deshalb, und der Link führt zu ihrer Begründung (NFA-3).
+ * Der Kommentar nennt nur die Anzahl der Verstöße; die Details zu den
+ * einzelnen Befunden stehen in deren jeweiligen Kommentaren.
  */
-export function renderSummary(review: Review, baseUrl: string): string {
-  const findings = findingsOf(review);
-  const counts = verdictCounts(findings);
-  const violations = counts.NC;
-  const learning = review.result?.mode === "learning";
-  const url = reviewUrl(baseUrl, review.id);
-  const lines: string[] = [];
-
-  lines.push(violations === 0
-    ? "**Architekturkonformität: keine Verstöße gefunden.**"
-    : `**Architekturkonformität: ${violations === 1 ? "1 Verstoß" : `${violations} Verstöße`} gefunden.**`);
-  lines.push("");
-
-  lines.push("| Urteil | Regeln |");
-  lines.push("| --- | ---: |");
-  lines.push(`| verletzt (NC) | ${violations} |`);
-  lines.push(`| nicht entscheidbar (CIA) | ${counts.CIA} |`);
-  lines.push(`| eingehalten (C) | ${counts.C} |`);
-  lines.push(`| **geprüft** | **${findings.length}** |`);
-  lines.push("");
-
-  if (violations > 0 && !learning) {
-    lines.push(
-      `${violations === 1 ? "Der Verstoß ist" : "Die Verstöße sind"} an der betroffenen Codestelle kommentiert.`,
-    );
-  }
-  lines.push(
-    `Eingehaltene und nicht entscheidbare Regeln werden hier bewusst nicht gemeldet. ` +
-      `Sie stehen mitsamt Urteil, Begründung, Belegstelle und Werkzeugprotokoll im vollständigen Bericht:`,
-  );
-  lines.push("");
-  lines.push(`**[Vollständigen Bericht öffnen](${url})**`);
-
-  return lines.join("\n");
+export function renderSummary(review: Review): string {
+  const violations = verdictCounts(findingsOf(review)).NC;
+  if (violations === 0) return "Es wurden keine Verstöße gefunden.";
+  if (violations === 1) return "Es wurde 1 Verstoß gefunden.";
+  return `Es wurden ${violations} Verstöße gefunden.`;
 }

@@ -3,6 +3,8 @@ import { ArrowUpRight, ChevronDown, CircleAlert, FileWarning, GitMerge } from "l
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { listReviews } from "@/lib/store";
+import { formatDate } from "@/lib/format";
+import { reviewHasFailures } from "@/lib/reviews";
 import type { AgentFailure } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +18,7 @@ const STAGE_LABEL: Record<AgentFailure["stage"], string> = {
 };
 
 export default async function ErrorTrackingPage() {
-  const reviews = await listReviews();
+  const reviews = await listReviews(Number.MAX_SAFE_INTEGER);
   const groups = reviews.flatMap((review) => {
     const issues: Array<{
       at: string;
@@ -28,7 +30,7 @@ export default async function ErrorTrackingPage() {
     const currentProgressError =
       review.sandboxProgress?.phase === "error" ||
       review.sandboxProgress?.phase === "timeout";
-    if (review.error || currentProgressError) {
+    if (reviewHasFailures(review)) {
       issues.push({
         at: review.updatedAt,
         stage: currentProgressError ? "Containerfehler" : "Reviewfehler",
@@ -82,7 +84,7 @@ export default async function ErrorTrackingPage() {
                       <div className="issue-main">
                         <div className="issue-heading"><strong>{issue.stage}</strong><Badge variant={issue.severity === "error" ? "destructive" : "warning"}>{issue.severity === "error" ? "Fehler" : "Warnung"}</Badge></div>
                         <p>{issue.message}</p>
-                        <div className="issue-meta"><span>{new Date(issue.at).toLocaleString("de-DE")}</span></div>
+                        <div className="issue-meta"><span>{formatDate(issue.at)}</span></div>
                       </div>
                     </CardContent>
                   ))}

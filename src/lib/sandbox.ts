@@ -13,6 +13,7 @@ import { spawn } from "node:child_process";
 import { env } from "./env";
 import { authenticatedRepoUrl } from "./gitlab";
 import { writeOperationalLog } from "./operational-log";
+import { SandboxProgressTracker } from "./sandbox-progress";
 import { updateReview } from "./store";
 import type { Review } from "./types";
 
@@ -60,7 +61,8 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
     LEARNING_BUDGET_SEARCH_ROUNDS: String(env.learningBudget.searchRounds),
     LEARNING_BUDGET_FILE_READS: String(env.learningBudget.fileReads),
     LEARNING_MAX_FINDINGS: String(env.learningBudget.maxFindings),
-    LEARNING_MAX_PATCH_BYTES: String(env.learningBudget.maxPatchBytes),
+    LEARNING_CHUNK_BYTES: String(env.learningBudget.chunkBytes),
+    LEARNING_CONCURRENCY: String(env.concurrency.learning),
     EXTRACTION_CONCURRENCY: String(env.concurrency.extraction),
     JUDGING_CONCURRENCY: String(env.concurrency.judging),
   };
@@ -110,28 +112,18 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    let pendingLine = "";
+    const pendingLines = { stdout: "", stderr: "" };
     let stderrTail = "";
-    let phase = "starting";
-    let lastMessage = "Podman startet den Sandbox-Container.";
-    let percent = 3;
-    let currentRule: number | undefined;
-    let totalRules: number | undefined;
+    const progress = new SandboxProgressTracker(startedAt);
     let persistChain = Promise.resolve();
 
     const persist = () => {
-      const snapshot = { phase, lastMessage, currentRule, totalRules, percent };
+      const snapshot = { ...progress.snapshot };
       persistChain = persistChain
         .then(async () => {
           await updateReview(review.id, (stored) => {
-            stored.sandboxProgress = {
-              phase: snapshot.phase,
-              message: snapshot.lastMessage,
-              percent: snapshot.percent,
-              currentRule: snapshot.currentRule,
-              totalRules: snapshot.totalRules,
-              updatedAt: new Date().toISOString(),
-            };
+            if (stored.status === "completed" || stored.status === "failed") return false;
+            stored.sandboxProgress = snapshot;
             stored.sandboxHeartbeatAt = new Date().toISOString();
           });
         })
@@ -172,113 +164,36 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
             ...selectedFields,
           });
         }
-        switch (eventName) {
-          case "run_start":
-            progressChanged = true;
-            phase = "running";
-            percent = 8;
-            lastMessage = "Review wird vorbereitet …";
-            break;
-          case "checkout_done":
-            progressChanged = true;
-            phase = "checkout";
-            percent = 18;
-            lastMessage = "Änderungen werden für die Prüfung vorbereitet …";
-            break;
-          case "rulebase_selected":
-            progressChanged = true;
-            phase = "rulebase";
-            percent = 25;
-            lastMessage = "Prüfkriterien werden geladen …";
-            break;
-          case "extraction_done":
-            progressChanged = true;
-            phase = "extraction";
-            percent = 35;
-            lastMessage = "Relevante Prüfkriterien werden ermittelt …";
-            break;
-          case "triage_done":
-            progressChanged = true;
-            phase = "triage";
-            percent = 40;
-            lastMessage = "Die Codeänderungen werden geprüft …";
-            break;
-          case "rule_start":
-            progressChanged = true;
-            phase = "judging";
-            currentRule =
-              typeof fields.index === "number" ? fields.index : undefined;
-            totalRules = typeof fields.of === "number" ? fields.of : undefined;
-            if (currentRule && totalRules) {
-              percent = Math.min(90, 40 + Math.floor((currentRule / totalRules) * 48));
-            }
-            lastMessage = totalRules
-              ? `Code wird geprüft (${currentRule ?? 1} von ${totalRules}) …`
-              : "Code wird geprüft …";
-            break;
-          case "rules_extracted":
-            progressChanged = true;
-            phase = "extraction";
-            lastMessage = "Prüfkriterien werden vorbereitet …";
-            break;
-          case "rule_judged":
-            progressChanged = true;
-            if (currentRule && totalRules) {
-              percent = Math.min(92, 40 + Math.floor((currentRule / totalRules) * 50));
-            }
-            lastMessage = "Code-Prüfung läuft …";
-            break;
-          case "callback_sent":
-            progressChanged = true;
-            phase = "callback";
-            percent = 98;
-            lastMessage = "Ergebnisse werden fertiggestellt …";
-            break;
-          case "run_summary":
-            progressChanged = true;
-            phase = "finishing";
-            percent = 95;
-            lastMessage = "Prüfung abgeschlossen; Ergebnisse werden gespeichert …";
-            break;
-          case "error":
-            progressChanged = true;
-            phase = "error";
-            percent = Math.min(percent, 90);
-            lastMessage = "Die Prüfung wird beendet. Ergebnisse werden geprüft …";
-            break;
-        }
+        progressChanged = progress.consume(eventName, fields);
       } catch {
         // Podman- und Git-Ausgaben sind für den Fortschritt nicht relevant.
       }
       if (progressChanged) persist();
     };
 
-    const capture = (chunk: Buffer) => {
+    const capture = (stream: "stdout" | "stderr", chunk: Buffer) => {
       const text = chunk.toString();
-      pendingLine += text;
-      const lines = pendingLine.split("\n");
-      pendingLine = lines.pop() ?? "";
+      pendingLines[stream] += text;
+      const lines = pendingLines[stream].split("\n");
+      pendingLines[stream] = lines.pop() ?? "";
       for (const line of lines) consumeLine(line);
     };
-    child.stdout.on("data", capture);
+    child.stdout.on("data", (chunk: Buffer) => capture("stdout", chunk));
     child.stderr.on("data", (chunk: Buffer) => {
       stderrTail = `${stderrTail}${chunk.toString()}`.slice(-8192);
-      capture(chunk);
+      capture("stderr", chunk);
     });
 
-    void updateReview(review.id, (stored) => {
+    const initialProgress = { ...progress.snapshot };
+    persistChain = updateReview(review.id, (stored) => {
+      if (stored.status === "completed" || stored.status === "failed") return false;
       stored.sandboxStartedAt = startedAt;
       stored.sandboxContainerName = containerName;
       stored.sandboxRuntime = env.sandboxRuntime;
       stored.sandboxProcessId = child.pid;
-      stored.sandboxProgress = {
-        phase,
-        message: lastMessage,
-        percent,
-        updatedAt: startedAt,
-      };
+      stored.sandboxProgress = initialProgress;
       stored.sandboxHeartbeatAt = startedAt;
-    }).catch(() => undefined);
+    }).then(() => undefined).catch(() => undefined);
     writeOperationalLog("application.log", {
       event: "sandbox_started",
       reviewId: review.id,
@@ -299,9 +214,7 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
     child.on("error", (error) => {
       clearTimeout(timer);
       clearInterval(heartbeat);
-      phase = "error";
-      lastMessage = `Podman konnte nicht gestartet werden: ${error.message}`;
-      percent = 0;
+      progress.set("error", progress.snapshot.percent, `Podman konnte nicht gestartet werden: ${error.message}`);
       writeOperationalLog("application.log", {
         event: "sandbox_start_failed",
         reviewId: review.id,
@@ -320,14 +233,16 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
     child.on("close", (code) => {
       clearTimeout(timer);
       clearInterval(heartbeat);
-      if (pendingLine) consumeLine(pendingLine);
-      phase = timedOut ? "timeout" : code === 0 ? "exited" : "error";
-      percent = code === 0 && !timedOut ? 100 : Math.min(percent, 90);
-      lastMessage = timedOut
+      for (const line of Object.values(pendingLines)) if (line) consumeLine(line);
+      progress.set(
+        timedOut ? "timeout" : code === 0 ? "exited" : "error",
+        code === 0 && !timedOut ? 99 : progress.snapshot.percent,
+        timedOut
         ? "Die Prüfung hat länger als erwartet gedauert und wurde beendet."
         : code === 0
-          ? "Review abgeschlossen."
-          : "Die Prüfung wurde unerwartet beendet.";
+          ? "Ergebnisse werden fertiggestellt …"
+          : "Die Prüfung wurde unerwartet beendet.",
+      );
       writeOperationalLog("application.log", {
         event: timedOut ? "sandbox_timeout" : code === 0 ? "sandbox_finished" : "sandbox_failed",
         reviewId: review.id,

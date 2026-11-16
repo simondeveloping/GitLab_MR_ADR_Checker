@@ -2,42 +2,11 @@ import Link from "next/link";
 import { Activity, CheckCircle2, GitMerge, Hash } from "lucide-react";
 import { DashboardCharts, type DashboardDay } from "@/components/monitor/dashboard-charts";
 import { listReviews } from "@/lib/store";
-import type { Review } from "@/lib/types";
+import { isActiveReview, reviewHasFailures } from "@/lib/reviews";
+import { reviewTokenBreakdown, reviewTokenCount } from "@/lib/review-tokens";
+import { compactFormat, integerFormat } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
-
-function reviewTokenBreakdown(review: Review): { prompt: number; completion: number } {
-  const stats = review.result?.stats;
-  if ((stats?.promptTokens ?? 0) + (stats?.completionTokens ?? 0) > 0) {
-    return { prompt: stats?.promptTokens ?? 0, completion: stats?.completionTokens ?? 0 };
-  }
-
-  return (review.result?.adrTokenUsage ?? []).reduce(
-    (total, usage) => ({ prompt: total.prompt + usage.promptTokens, completion: total.completion + usage.completionTokens }),
-    (review.result?.findings ?? []).reduce(
-      (total, finding) => ({
-        prompt: total.prompt + (finding.tokenUsage?.promptTokens ?? 0),
-        completion: total.completion + (finding.tokenUsage?.completionTokens ?? 0),
-      }),
-      { prompt: 0, completion: 0 },
-    ),
-  );
-}
-
-function reviewTokenCount(review: Review): number {
-  const statsTotal = review.result?.stats.totalTokens;
-  if (typeof statsTotal === "number" && statsTotal > 0) return statsTotal;
-  const { prompt, completion } = reviewTokenBreakdown(review);
-  return prompt + completion;
-}
-
-function reviewHasFailures(review: Review): boolean {
-  return review.status === "failed" || Boolean(review.error) ||
-    review.sandboxProgress?.phase === "error" || review.sandboxProgress?.phase === "timeout";
-}
-
-const integerFormat = new Intl.NumberFormat("de-DE");
-const compactFormat = new Intl.NumberFormat("de-DE", { notation: "compact", maximumFractionDigits: 1 });
 
 export default async function MonitorDashboardPage() {
   const reviews = await listReviews(Number.MAX_SAFE_INTEGER);
@@ -78,7 +47,7 @@ export default async function MonitorDashboardPage() {
 
   const totalTokens = reviews.reduce((sum, review) => sum + reviewTokenCount(review), 0);
   const completedReviews = reviews.filter((review) => review.status === "completed").length;
-  const runningReviews = reviews.filter((review) => review.status === "running" || review.status === "queued").length;
+  const runningReviews = reviews.filter((review) => isActiveReview(review.status)).length;
   const failedReviews = reviews.filter(reviewHasFailures).length;
   const averageTokens = reviews.length ? Math.round(totalTokens / reviews.length) : 0;
 
@@ -118,7 +87,7 @@ export default async function MonitorDashboardPage() {
         </div>
       </section>
 
-      <main className="dashboard-main"><DashboardCharts data={chartData} /></main>
+      <div className="dashboard-main"><DashboardCharts data={chartData} /></div>
     </>
   );
 }

@@ -9,6 +9,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/unit/*.test.ts",
+    "test:e2e": "playwright test",
     "sandbox:build": "podman build -t adr-review-agent:latest -f sandbox/Containerfile sandbox"
   },
   "dependencies": {
@@ -25,11 +27,13 @@
     "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@types/node": "^22.10.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.4.3",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.0"
   }
 }

@@ -10,6 +10,7 @@
  */
 
 import { config } from "./config.js";
+import { setTimeout as delay } from "node:timers/promises";
 import { log, recordModelCall } from "./trace.js";
 
 export interface ToolSchema {
@@ -38,15 +39,12 @@ interface RawToolCall {
 export interface Completion {
   content: string | null;
   toolCalls: ToolCall[];
+  finishReason?: string;
   /** Rohform der Assistant-Nachricht, die zurück in den Verlauf muss. */
   raw: Message;
 }
 
 const RETRYABLE = new Set([408, 429, 500, 502, 503, 504]);
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 /**
  * Ein Aufruf der Chat-Completions-Schnittstelle.
@@ -88,7 +86,7 @@ export async function complete(
 
   let lastError = "";
   for (let attempt = 0; attempt < 4; attempt += 1) {
-    if (attempt > 0) await sleep(1000 * 2 ** (attempt - 1));
+    if (attempt > 0) await delay(1000 * 2 ** (attempt - 1));
 
     let response: Response;
     try {
@@ -114,6 +112,7 @@ export async function complete(
 
     const payload = (await response.json()) as {
       choices?: Array<{
+        finish_reason?: string;
         message?: {
           content?: string | null;
           tool_calls?: RawToolCall[];
@@ -141,6 +140,7 @@ export async function complete(
 
     return {
       content: message.content ?? null,
+      finishReason: payload.choices?.[0]?.finish_reason,
       toolCalls: (message.tool_calls ?? []).map((call) => ({
         id: call.id,
         name: call.function.name,

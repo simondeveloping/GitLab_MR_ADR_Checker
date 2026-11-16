@@ -1,5 +1,7 @@
 "use client";
 
+import { integerFormat } from "@/lib/format";
+
 import {
   Bar,
   BarChart,
@@ -30,7 +32,7 @@ function FeedbackTooltip({
   return (
     <div className="dashboard-tooltip">
       <strong>{entry.label}</strong>
-      <span>{new Intl.NumberFormat("de-DE").format(entry.count)} Rückmeldungen</span>
+      <span>{integerFormat.format(entry.count)} Rückmeldungen</span>
     </div>
   );
 }

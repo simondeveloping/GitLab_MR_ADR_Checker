@@ -7,7 +7,7 @@ import { ArrowRight, GitMerge, RefreshCw, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { ReviewTable } from "@/components/review-table";
-import type { Review } from "@/lib/types";
+import { isActiveReview, type ReviewSummary } from "@/lib/reviews";
 
 type StatusFilter = "all" | "completed" | "active";
 
@@ -23,23 +23,21 @@ export function ReviewsBrowser({
   reviews,
   initialQuery,
   initialStatus,
-  completedCount,
-  activeCount,
 }: {
-  reviews: Review[];
+  reviews: ReviewSummary[];
   initialQuery: string;
   initialStatus: StatusFilter;
-  completedCount: number;
-  activeCount: number;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState(initialQuery);
   const [isRefreshing, startRefresh] = useTransition();
+  const completedCount = reviews.filter((review) => review.status === "completed").length;
+  const activeCount = reviews.filter((review) => isActiveReview(review.status)).length;
   const normalizedQuery = query.trim().toLocaleLowerCase("de-DE");
   const visibleReviews = reviews.filter((review) => {
     const matchesStatus = initialStatus === "all"
       || (initialStatus === "completed" && review.status === "completed")
-      || (initialStatus === "active" && (review.status === "running" || review.status === "queued"));
+      || (initialStatus === "active" && isActiveReview(review.status));
     const matchesQuery = !normalizedQuery || [
       review.mr.title,
       review.mr.projectPath,
@@ -57,7 +55,10 @@ export function ReviewsBrowser({
           <Link className="review-filter-tab" aria-current={initialStatus === "active" ? "page" : undefined} href={filterHref("active", query)}>In Bearbeitung <span>{activeCount}</span></Link>
         </nav>
         <div className="review-actions">
-          <form className="search-field" role="search" onSubmit={(event) => event.preventDefault()}>
+          <form className="search-field" role="search" onSubmit={(event) => {
+            event.preventDefault();
+            router.replace(filterHref(initialStatus, query.trim()));
+          }}>
             <Search size={15} aria-hidden="true" />
             <input
               aria-label="Merge Requests durchsuchen"
@@ -83,7 +84,12 @@ export function ReviewsBrowser({
         <div className="empty-state">
           <div className="empty-state-icon"><GitMerge size={24} /></div>
           <h2>{normalizedQuery || initialStatus !== "all" ? "Keine passenden Reviews" : "Keine Reviews vorhanden"}</h2>
-          {normalizedQuery || initialStatus !== "all" ? <Button variant="outline" asChild><Link href="/">Filter zurücksetzen <ArrowRight size={14} /></Link></Button> : null}
+          {normalizedQuery || initialStatus !== "all" ? (
+            <Button variant="outline" onClick={() => {
+              setQuery("");
+              router.replace("/");
+            }}>Filter zurücksetzen <ArrowRight size={14} /></Button>
+          ) : null}
         </div>
       ) : (
         <ReviewTable reviews={visibleReviews} highlightQuery={query} />

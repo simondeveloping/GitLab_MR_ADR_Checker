@@ -206,7 +206,9 @@ export const env = {
   },
   get callbackBaseUrl() {
     return (
-      process.env.CALLBACK_BASE_URL ?? "http://host.containers.internal:3000"
+      process.env.SANDBOX_CALLBACK_BASE_URL ??
+      process.env.CALLBACK_BASE_URL ??
+      "http://host.containers.internal:3000"
     ).replace(/\/+$/, "");
   },
   /**
@@ -216,8 +218,8 @@ export const env = {
    */
   get publicBaseUrl() {
     return (
-      process.env.PUBLIC_BASE_URL ??
-      process.env.CALLBACK_BASE_URL ??
+      process.env.PUBLIC_BASE_URL ||
+      process.env.CALLBACK_BASE_URL ||
       "http://localhost:3000"
     ).replace(/\/+$/, "");
   },
@@ -233,17 +235,18 @@ export const env = {
       refetches: optionalNumber("BUDGET_REFETCHES", 2),
     };
   },
-  /** Separates higher coverage limits for the learning review. */
+  /** Lernreview-Budgets je Diffteil, Integrationspaket bzw. Verifikation. */
   get learningBudget() {
     return {
       searchRounds: optionalNumber("LEARNING_BUDGET_SEARCH_ROUNDS", 24),
       fileReads: optionalNumber("LEARNING_BUDGET_FILE_READS", 16),
       maxFindings: optionalNumber("LEARNING_MAX_FINDINGS", 20),
-      maxPatchBytes: optionalNumber("LEARNING_MAX_PATCH_BYTES", 200_000),
+      chunkBytes: Math.min(48_000, Math.floor(optionalNumber("LEARNING_CHUNK_BYTES", optionalNumber("LEARNING_MAX_PATCH_BYTES", 32_000)))),
     };
   },
   get concurrency() {
     return {
+      learning: optionalNumber("LEARNING_CONCURRENCY", 3),
       extraction: optionalNumber("EXTRACTION_CONCURRENCY", 3),
       judging: optionalNumber("JUDGING_CONCURRENCY", 3),
     };

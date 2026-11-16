@@ -1,24 +1,45 @@
 import { NextResponse } from "next/server";
+import { isTheme, THEME_COOKIE, THEME_MAX_AGE } from "@/lib/theme";
 
 export async function POST(request: Request): Promise<NextResponse> {
   const url = new URL(request.url);
-  const form = await request.formData();
-  const theme = form.get("theme");
-  const returnTo = form.get("returnTo");
+  const json = request.headers.get("content-type")?.includes("application/json");
+  let theme: unknown;
+  let returnTo: unknown;
+  try {
+    if (json) {
+      const body: unknown = await request.json();
+      theme = body && typeof body === "object" && "theme" in body ? body.theme : undefined;
+    } else {
+      const form = await request.formData();
+      theme = form.get("theme");
+      returnTo = form.get("returnTo");
+    }
+  } catch {
+    return NextResponse.json({ error: "invalid payload" }, { status: 400 });
+  }
 
-  if (theme !== "light" && theme !== "dark") {
+  if (!isTheme(theme)) {
     return NextResponse.json({ error: "theme must be light or dark" }, { status: 400 });
   }
 
   // Nur relative interne Ziele akzeptieren, damit der Theme-Submit nicht als
   // offener Redirect auf eine fremde Website missbraucht werden kann.
-  const destination = typeof returnTo === "string" && returnTo.startsWith("/") && !returnTo.startsWith("//")
-    ? returnTo
-    : "/settings";
-  const response = NextResponse.redirect(new URL(destination, url.origin), 303);
-  response.cookies.set("adr-review-theme", theme, {
+  const destination = new URL("/settings", url.origin);
+  if (typeof returnTo === "string" && returnTo.startsWith("/")) {
+    try {
+      const candidate = new URL(returnTo, url.origin);
+      if (candidate.origin === url.origin) destination.href = candidate.href;
+    } catch {
+      // Ungültige Rücksprungziele verwenden die Einstellungsseite.
+    }
+  }
+  const response = json
+    ? NextResponse.json({ theme })
+    : NextResponse.redirect(destination, 303);
+  response.cookies.set(THEME_COOKIE, theme, {
     httpOnly: true,
-    maxAge: 60 * 60 * 24 * 365,
+    maxAge: THEME_MAX_AGE,
     path: "/",
     sameSite: "lax",
     secure: url.protocol === "https:",

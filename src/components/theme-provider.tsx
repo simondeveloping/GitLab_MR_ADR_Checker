@@ -1,41 +1,49 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useRef, useState } from "react";
+import type { Theme } from "@/lib/theme";
 
-type Theme = "light" | "dark";
+const ThemeContext = createContext<{
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
+  error: string | null;
+} | null>(null);
 
-const ThemeContext = createContext<{ theme: Theme; setTheme: (theme: Theme) => void } | null>(null);
+export function ThemeProvider({ children, initialTheme }: {
+  children: React.ReactNode;
+  initialTheme: Theme;
+}) {
+  const [theme, setTheme] = useState(initialTheme);
+  const [error, setError] = useState<string | null>(null);
+  const pendingSave = useRef(Promise.resolve());
+  const revision = useRef(0);
 
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>("light");
-  const hasUserSelectedTheme = useRef(false);
+  const changeTheme = useCallback((nextTheme: Theme) => {
+    document.documentElement.dataset.theme = nextTheme;
+    setTheme(nextTheme);
+    setError(null);
+    const currentRevision = ++revision.current;
 
-  useEffect(() => {
-    let storedTheme: string | null = null;
-    try {
-      storedTheme = window.localStorage.getItem("adr-review-theme");
-    } catch {
-      // The selected theme still works for this session when storage is unavailable.
-    }
-    const initialTheme = storedTheme === "dark" ? "dark" : "light";
-    document.documentElement.dataset.theme = initialTheme;
-    window.requestAnimationFrame(() => {
-      if (!hasUserSelectedTheme.current) setTheme(initialTheme);
+    // Schnelle Klicks wirken sofort. Cookie-Schreibvorgänge bleiben geordnet,
+    // damit eine langsame Antwort keine neuere Auswahl überschreibt.
+    pendingSave.current = pendingSave.current.then(async () => {
+      try {
+        const response = await fetch("/api/theme", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ theme: nextTheme }),
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!response.ok) throw new Error("Theme konnte nicht gespeichert werden.");
+      } catch {
+        if (revision.current === currentRevision) {
+          setError("Farbschema ist aktiv, konnte aber nicht dauerhaft gespeichert werden. Bitte erneut auswählen.");
+        }
+      }
     });
   }, []);
 
-  const changeTheme = useCallback((nextTheme: Theme) => {
-    hasUserSelectedTheme.current = true;
-    document.documentElement.dataset.theme = nextTheme;
-    setTheme(nextTheme);
-    try {
-      window.localStorage.setItem("adr-review-theme", nextTheme);
-    } catch {
-      // Keep the in-memory theme change even if the browser blocks persistence.
-    }
-  }, []);
-
-  return <ThemeContext.Provider value={{ theme, setTheme: changeTheme }}>{children}</ThemeContext.Provider>;
+  return <ThemeContext.Provider value={{ theme, setTheme: changeTheme, error }}>{children}</ThemeContext.Provider>;
 }
 
 export function useTheme() {
