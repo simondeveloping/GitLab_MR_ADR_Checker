@@ -198,6 +198,9 @@ export const env = {
   get sandboxRuntime() {
     return process.env.SANDBOX_RUNTIME ?? "podman";
   },
+  get sandboxNetwork() {
+    return process.env.SANDBOX_NETWORK;
+  },
   get sandboxTimeoutSeconds() {
     return optionalNumber("SANDBOX_TIMEOUT_SECONDS", 1800);
   },

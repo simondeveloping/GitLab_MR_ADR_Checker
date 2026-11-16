@@ -92,12 +92,11 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
     "512",
   ];
 
-  // CALLBACK_BASE_URL remains the externally configured URL, but inside a
-  // rootless Podman container its public DNS address may hairpin back to the
-  // VM and be refused. Resolve that same hostname to Podman's host gateway so
-  // the callback reaches this backend without changing the URL or HTTP Host.
-  const callbackHost = new URL(env.callbackBaseUrl).hostname;
-  args.push("--add-host", `${callbackHost}:host-gateway`);
+  // In Compose, join the app's user-defined Podman network so the callback can
+  // use the app service DNS name instead of hairpinning through the host.
+  if (env.sandboxNetwork) {
+    args.push("--network", env.sandboxNetwork);
+  }
 
   for (const key of Object.keys(envPairs)) {
     args.push("--env", key);

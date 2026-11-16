@@ -87,8 +87,12 @@ systemctl --user enable --now podman.socket
 ```
 
 Die Compose-Datei verwendet den rootless Socket unter
-`$XDG_RUNTIME_DIR/podman/podman.sock`. Der Sandbox-Callback wird unverändert aus
-`CALLBACK_BASE_URL` in `.env` übernommen. Starte und baue alles als derselbe
+`$XDG_RUNTIME_DIR/podman/podman.sock`. Für Compose setzt die Datei den
+Sandbox-Callback bewusst auf `http://app:5000` (und überschreibt damit den
+Wert aus `.env`): Die App und jede Review-Sandbox
+verwenden ein gemeinsames, benanntes Podman-Netzwerk (`adr-review`). So läuft
+der Callback intern und ist unabhängig von öffentlichem DNS, VM-Port und
+Portweiterleitung. Starte und baue alles als derselbe
 Benutzer – **ohne `sudo`** –, damit App, Sandbox-Image und Socket dieselbe
 Podman-Instanz verwenden. Trage anschließend die erforderlichen GitLab-,
 Webhook- und LLM-Werte in `.env` ein. Zum Starten:
