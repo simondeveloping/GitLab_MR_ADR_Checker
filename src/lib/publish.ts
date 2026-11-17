@@ -21,16 +21,14 @@ import type { Finding, Review } from "./types";
 interface DiffTarget {
   newPath: string;
   oldPath: string;
-  /** Zeilennummern im Zielstand, die im Diff auftauchen. */
+  /** Tatsächlich hinzugefügte Zeilen im Zielstand. */
   newLines: Set<number>;
 }
 
 const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 
 /**
- * Liest aus den Diff-Hunks alle Zeilennummern des Zielstands heraus, die im
- * Diff sichtbar sind. Entfernte Zeilen zählen nicht mit, da sie im Zielstand
- * keine Position haben.
+ * Liest nur hinzugefügte Zeilen aus den Diff-Hunks heraus.
  */
 function collectNewLines(diffText: string): Set<number> {
   const lines = new Set<number>();
@@ -51,10 +49,7 @@ function collectNewLines(diffText: string): Set<number> {
       // Zeile existiert im Zielstand nicht.
     } else if (line.startsWith("\\")) {
       // "\ No newline at end of file"
-    } else {
-      lines.add(cursor);
-      cursor += 1;
-    }
+    } else cursor += 1;
   }
 
   return lines;
@@ -81,8 +76,8 @@ async function loadDiffTargets(
 }
 
 /**
- * Sucht die erste Belegstelle eines Befunds, die auf einer im Diff
- * enthaltenen Zeile liegt.
+ * Sucht die erste Belegstelle eines Befunds auf einer tatsächlich
+ * hinzugefügten Zeile. Kontextzeilen sind keine MR-Änderungen.
  */
 function findCommentablePosition(
   finding: Finding,

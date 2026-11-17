@@ -27,15 +27,12 @@ import { config } from "./config.js";
 import { sendCallback } from "./callback.js";
 import { buildStats } from "./stats.js";
 import { checkout } from "./checkout.js";
-import { mapWithConcurrency } from "./concurrency.js";
-import { trackProgress } from "./progress.js";
 import { extractRules } from "./extract.js";
-import { judgeRule } from "./judge.js";
+import { reviewArchitecture } from "./architecture.js";
 import { reviewForLearning } from "./learning.js";
 import { loadRuleBase } from "./rulebase.js";
 import { setExcludedAdrPaths } from "./tools.js";
 import { counters, log } from "./trace.js";
-import { triage } from "./triage.js";
 import type { AgentFailure, Finding, SandboxResult } from "./types.js";
 
 async function main(): Promise<void> {
@@ -117,34 +114,15 @@ async function main(): Promise<void> {
     failures: extraction.failures.length,
   });
 
-  // 4 Vorfilter
-  const triageStartedAt = performance.now();
-  const triaged = await triage(extraction.rules, relevantFiles);
-  const triageMs = Math.round(performance.now() - triageStartedAt);
-  failures.push(...triaged.failures);
-
-  // 5 Prüfung je Regel
+  // 4/5 Diffbasierte Zuordnung, gemeinsame Suche und unabhängige Verifikation.
   const judgingStartedAt = performance.now();
-  const advanceJudging = trackProgress("judging", triaged.selected.length);
-  const judged = await mapWithConcurrency(
-    triaged.selected,
-    config.concurrency.judging,
-    async (rule, index) => {
-      log.info("rule_start", {
-        index: index + 1,
-        of: triaged.selected.length,
-        ruleId: rule.id,
-      });
-      try {
-        return await judgeRule(rule, relevantFiles);
-      } finally {
-        advanceJudging();
-      }
-    },
-  );
-  const findings: Finding[] = judged.map((outcome) => outcome.finding);
-  failures.push(...judged.flatMap((outcome) => outcome.failures));
-  const judgingMs = Math.round(performance.now() - judgingStartedAt);
+  const architecture = relevantFiles.length > 0
+    ? await reviewArchitecture(extraction.rules)
+    : { findings: [] as Finding[], dropped: [], failures: [], triageMs: 0 };
+  const findings = architecture.findings;
+  failures.push(...architecture.failures);
+  const triageMs = architecture.triageMs;
+  const judgingMs = Math.max(0, Math.round(performance.now() - judgingStartedAt) - triageMs);
 
   // 6 Befunde bündeln und zurückmelden
   const result: SandboxResult = {
@@ -154,7 +132,7 @@ async function main(): Promise<void> {
     adrFiles: ruleBase.documents.map((doc) => doc.file),
     changedFiles,
     rules: extraction.rules,
-    droppedRules: triaged.dropped,
+    droppedRules: architecture.dropped,
     findings,
     failures,
     adrTokenUsage: extraction.adrTokenUsage,

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { renderComment, renderSummary } from "../../src/lib/comment";
+import { groupByAdr, renderComment, renderSummary } from "../../src/lib/comment";
 import { makeReview } from "../fixtures";
 
 test("ADR-Abschlusskommentar nennt nur die Anzahl der Verstöße", () => {
@@ -31,4 +31,14 @@ test("ADR-Befundkommentar enthält keinen Berichtslink", () => {
   assert.match(comment, /Architekturkonformität: 1 Befund/);
   assert.match(comment, /Die Eingabe kann leer sein\./);
   assert.doesNotMatch(comment, /Vollständigen Bericht öffnen|\/reviews\//);
+});
+
+test("Architekturbefunde bekommen getrennte Positionen und konkrete Verbesserungen", () => {
+  const finding = makeReview().result!.findings[0];
+  finding.rule = { ...finding.rule, origin: "project", adrFile: "001-architektur.md" };
+  finding.consequence = "Aufrufer bekommen einen falschen Wert.";
+  finding.suggestion = "Den Rückgabewert an die Schnittstelle anpassen.";
+  assert.equal(groupByAdr([finding, { ...finding, id: "another" }]).size, 2);
+  assert.match(renderComment([finding]), /Mögliche Folge:.*falschen Wert/);
+  assert.match(renderComment([finding]), /Verbesserung:.*Schnittstelle anpassen/);
 });

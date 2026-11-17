@@ -42,16 +42,13 @@ export function ruleSource(finding: Finding): string {
 }
 
 /**
- * Gruppiert die Befunde nach dem ADR, aus dem ihre Regel stammt. Ein ADR mit
- * mehreren verletzten Regeln erzeugt damit einen zusammenhängenden Kommentar
- * statt mehrerer verstreuter.
+ * Lern- und Architekturbefunde einzeln platzieren: dieselbe ADR-Datei kann
+ * unterschiedliche Codestellen und damit unterschiedliche Inline-Positionen betreffen.
  */
 export function groupByAdr(findings: Finding[]): Map<string, Finding[]> {
   const groups = new Map<string, Finding[]>();
   for (const finding of findings) {
-    const key = finding.rule.origin === "learning"
-      ? `learning:${finding.id}`
-      : `${finding.rule.origin}:${finding.rule.adrFile}`;
+    const key = `${finding.rule.origin}:${finding.id}`;
     const bucket = groups.get(key);
     if (bucket) bucket.push(finding);
     else groups.set(key, [finding]);
@@ -94,6 +91,9 @@ export function renderComment(findings: Finding[]): string {
     lines.push("");
     lines.push(finding.rationale.trim());
     lines.push("");
+
+    if (finding.consequence) lines.push(`**Mögliche Folge:** ${finding.consequence.trim()}`, "");
+    if (finding.suggestion) lines.push(`**Verbesserung:** ${finding.suggestion.trim()}`, "");
 
     if (finding.evidence.length > 0) {
       lines.push("Belegstellen:");

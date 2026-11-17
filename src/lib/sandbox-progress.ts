@@ -7,6 +7,8 @@ type Progress = NonNullable<Review["sandboxProgress"]>;
 const PHASES: Record<string, { start: number; end: number; label: string }> = {
   extraction: { start: 25, end: 35, label: "ADR-Dokumente" },
   judging: { start: 40, end: 92, label: "Regeln" },
+  architecture_search: { start: 40, end: 68, label: "Änderungseinheiten" },
+  architecture_verify: { start: 68, end: 92, label: "Verstoßkandidaten" },
   learning_collect: { start: 30, end: 55, label: "Diffteile" },
   learning_integration: { start: 55, end: 65, label: "Integrationspakete" },
   learning_verify: { start: 65, end: 82, label: "Kandidaten" },

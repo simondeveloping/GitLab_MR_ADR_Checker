@@ -36,7 +36,7 @@ const SYSTEM_PROMPT = `Du zerlegst ein Architecture Decision Record (ADR) in ein
 
 AUFGABE
 Gib ausschliesslich die Festlegungen wieder, die das Dokument tatsaechlich TRIFFT
-UND die fuer die geaenderten Dateien dieses Merge Requests plausibel relevant
+  UND die fuer die Aenderungen dieses Merge Requests plausibel relevant
 sind.
 
 EINE REGEL IST:
@@ -49,15 +49,13 @@ NICHT ZUR REGEL WERDEN:
 - Begruendungen, Vor- und Nachteile, Konsequenzen,
 - Absichtserklaerungen ohne pruefbaren Gehalt ("wir wollen wartbaren Code"),
 - Verweise auf Migrationstickets oder zeitliche Plaene,
-- Festlegungen, deren Gegenstand mit keiner geaenderten Datei plausibel zu tun
-  hat.
+- Festlegungen, deren Gegenstand eindeutig weder direkt noch indirekt durch
+  die Aenderungen betroffen sein kann.
 
 RELEVANZ
-- Nutze die geaenderten Dateipfade als harte Vorauswahl.
-- Waehle eine Regel nur, wenn Dateiname, Verzeichnis, Technologie oder
-  Artefakttyp einen Bezug erkennen lassen.
-- Im Zweifel darf eine Regel aufgenommen werden, aber erzeuge keine vollstaendige
-  Regelbasis fuer das ganze Projekt.
+- Dateipfade sind nur Hinweise. Beruecksichtige auch moegliche Aufrufer,
+  Schnittstellen und Konfiguration, selbst wenn sie nicht geaendert wurden.
+- Im Zweifel nimm die Festlegung auf; die spaetere Triage sieht den echten Diff.
 
 Eine Festlegung, die mehrere Sachverhalte zugleich meint, wird in mehrere
 Regeln zerlegt. Formuliere die Regel positiv oder als klares Verbot, aber

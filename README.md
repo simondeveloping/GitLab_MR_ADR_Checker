@@ -33,10 +33,14 @@ Die Prüfung läuft in diesen Schritten:
    Merge-Request-Diff für die Code-Prüfung ausgeschlossen. Enthält ein MR nur
    ADR-Änderungen oder herausgefiltertes Rauschen, gibt es nichts zu prüfen.
 2. Im Architekturmodus werden aus den ADRs einzelne, prüfbare Regeln
-   extrahiert. Eine Triage wählt Regeln aus, die für geänderte Dateipfade
-   relevant erscheinen; Locator und Reader suchen und bewerten Belegstellen.
-   Die Urteile lauten `C` (eingehalten), `NC` (nicht konform/verletzt) oder
-   `CIA` (nicht entscheidbar).
+   extrahiert. Die Triage ordnet Regeln anhand von Diffteilen, geänderten
+   Zeilen und möglichen Schnittstellenbezügen zu. Eine gemeinsame Suche je
+   Diffteil sammelt Verdachtsfälle für mehrere Regeln; jeder Verdachtsfall
+   wird anschließend unabhängig am Originalcode samt Gegenbelegsuche geprüft.
+   Nur ein belegter, an einer hinzugefügten Zeile verankerter Verstoß wird als
+   `NC` (nicht konform) gemeldet. Wo kein Verstoß nachgewiesen ist, wird
+   konservativ `CIA` (nicht entscheidbar) statt einer unbelegten Aussage über
+   die Einhaltung (`C`) verwendet.
 3. Im Lernmodus wird der Diff an Hunkgrenzen und bei großen Hunks an Zeilengrenzen
    aufgeteilt. Jeder Teil wird mit eigenem Modellkontext und Suchbudget im
    Zusammenhang mit dem **gesamten ausgecheckten Repository** untersucht. Die
@@ -54,7 +58,8 @@ Die Prüfung läuft in diesen Schritten:
    passenden Regressionstest. Reine Stilpräferenzen ohne konkreten Nachteil werden
    nicht gemeldet. Fehler einzelner Analysen werden separat erfasst; erfolgreiche
    Teilergebnisse bleiben für die folgenden Phasen erhalten.
-4. Im Architekturmodus werden `NC`-Befunde nach ADR gruppiert. Im Lernmodus
+4. Im Architekturmodus werden `NC`-Befunde einzeln an ihren jeweiligen
+   geänderten Zeilen platziert, mit Folge und Verbesserungsvorschlag. Im Lernmodus
     werden konkrete Hinweise mit möglicher Folge und Verbesserungsvorschlag
     einzeln veröffentlicht; die Kommentare sind ausdrücklich
    nicht blockierend. Befunde erscheinen, sofern möglich, als Inline-
@@ -242,9 +247,8 @@ Merge Requests und andere Aktionen starten keinen neuen Lauf.
    mit dem Status **Warteschlange** oder **In Bearbeitung** erscheinen. Öffne
    den Merge-Request-Eintrag, um die Fortschrittsanzeige zu sehen.
 3. Nach Abschluss zeigt die Detailseite die verwendete Regelbasis, Laufzeit und
-   geprüften Regeln. `NC` bedeutet, dass eine Regel verletzt wurde, `C`, dass sie
-   eingehalten wurde, und `CIA`, dass sie anhand der verfügbaren Belege nicht
-   entscheidbar war. Klappe die Ergebnisgruppen auf, um Begründung, Belegstellen
+   geprüften Regeln. `NC` bedeutet, dass eine Regel verletzt wurde, und `CIA`,
+   dass sie anhand der verfügbaren Belege nicht entscheidbar war. Klappe die Ergebnisgruppen auf, um Begründung, Belegstellen
    und Diff-Ausschnitte zu lesen.
 4. Nur `NC`-Befunde werden als Diskussionen in GitLab veröffentlicht. Wenn ein
    Befund einer geänderten Zeile zugeordnet werden kann, erscheint er inline;
@@ -369,8 +373,8 @@ separaten TypeScript-Prüfkern aus `sandbox/src/` sowie die Gruppenstandards aus
 | `sandbox/src/rulebase.ts` | Automatisch Architektur- und Lernmodus wählen; Regelbasen kombinieren |
 | `sandbox/src/learning.ts` | Kandidaten sammeln, Integration prüfen, verifizieren, Dubletten entfernen und Kommentare formulieren |
 | `sandbox/src/learning-diff.ts`, `sandbox/src/learning-session.ts` | Diffteile mit Originalzeilen und budgetierte Repository-Sitzungen |
-| `sandbox/src/extract.ts`, `sandbox/src/triage.ts` | Regeln extrahieren und vorfiltern |
-| `sandbox/src/judge.ts`, `sandbox/src/tools.ts` | Regeln mit Locator/Reader und Werkzeugen prüfen |
+| `sandbox/src/extract.ts`, `sandbox/src/triage.ts` | Regeln extrahieren und nach Diffteilen zuordnen |
+| `sandbox/src/architecture.ts`, `sandbox/src/tools.ts` | Verdachtsfälle gemeinsam suchen und einzeln verifizieren |
 | `sandbox/src/callback.ts`, `sandbox/src/stats.ts` | Ergebnisübertragung und gemeinsame Laufstatistik |
 | `sandbox/standards/` | Mitgelieferte organisationsweite Regelbasis |
 | `tests/` | Browser- und Regressionstests sowie Prüfung des Callback-Typvertrags |
@@ -379,9 +383,8 @@ separaten TypeScript-Prüfkern aus `sandbox/src/` sowie die Gruppenstandards aus
 
 - Feedback zu einzelnen Befunden wird gespeichert, aber nicht zum Training oder
   zur Änderung späterer Prüfläufe verwendet.
-- Die Triage orientiert sich an Dateipfaden. Eine Regel kann daher übersehen
-  werden, wenn ihre Verletzung in einer dem Namen nach unverdächtigen Datei
-  liegt.
+- Die Triage nutzt Diffteile und Schnittstellenhinweise, kann indirekte
+  Auswirkungen außerhalb des sichtbaren Änderungskontexts aber weiterhin übersehen.
 - Es gibt keine sprachspezifische Analyse oder Schweregrad-Priorisierung.
 - Die Bachelorarbeit beschreibt die empirische Evaluation und die gemessenen
   Festlegungen, auf denen Parameter wie Werkzeugbudget, Parallelität und die
