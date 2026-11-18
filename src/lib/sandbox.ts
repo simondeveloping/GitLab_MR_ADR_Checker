@@ -54,6 +54,10 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
     LLM_BASE_URL: env.llmBaseUrl,
     LLM_API_KEY: env.llmApiKey,
     LLM_MODEL: env.llmModel,
+    LLM_FAST_MODEL: process.env.LLM_FAST_MODEL || env.llmModel,
+    LLM_VERIFY_MODEL: process.env.LLM_VERIFY_MODEL || env.llmModel,
+    ADR_RULE_CACHE: process.env.ADR_RULE_CACHE === "0" ? "0" : "1",
+    ADR_LEARNING_EXPLANATION: review.learningExplanation === true ? "1" : "0",
     LLM_TEMPERATURE: String(env.llmTemperature),
     BUDGET_SEARCH_ROUNDS: String(env.budget.searchRounds),
     BUDGET_FILE_READS: String(env.budget.fileReads),
@@ -63,6 +67,10 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
     LEARNING_MAX_FINDINGS: String(env.learningBudget.maxFindings),
     LEARNING_CHUNK_BYTES: String(env.learningBudget.chunkBytes),
     LEARNING_CONCURRENCY: String(env.concurrency.learning),
+    LEARNING_MODEL: process.env.LEARNING_MODEL || env.llmModel,
+    LEARNING_VERIFY_MODEL: process.env.LEARNING_VERIFY_MODEL || process.env.LEARNING_MODEL || env.llmModel,
+    LEARNING_DEDUP_MODEL: process.env.LEARNING_DEDUP_MODEL || process.env.LEARNING_MODEL || env.llmModel,
+    LEARNING_INTEGRATION_MODE: process.env.LEARNING_INTEGRATION_MODE === "always" ? "always" : "auto",
     EXTRACTION_CONCURRENCY: String(env.concurrency.extraction),
     JUDGING_CONCURRENCY: String(env.concurrency.judging),
   };
@@ -106,9 +114,14 @@ export function runSandbox(review: Review): Promise<SandboxOutcome> {
 
   args.push(env.sandboxImage);
 
+  // Die Benutzernamenliste bleibt im Backend; auch der Runtime-Prozess erhält
+  // nur die bereits getroffene Auswahl. In den Container gehen nur envPairs.
+  const runtimeEnv = { ...process.env, ...envPairs };
+  delete runtimeEnv.LEARNING_USERS;
+
   return new Promise((resolve) => {
     const child = spawn(env.sandboxRuntime, args, {
-      env: { ...process.env, ...envPairs },
+      env: runtimeEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
 

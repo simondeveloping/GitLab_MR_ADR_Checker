@@ -35,6 +35,8 @@ export class Counters {
   toolCalls = 0;
   promptTokens = 0;
   completionTokens = 0;
+  modelMs = 0;
+  retries = 0;
 
   get totalTokens(): number {
     return this.promptTokens + this.completionTokens;
@@ -75,10 +77,14 @@ function snapshot(state: ScopeState): ScopedUsage {
 export function recordModelCall(
   promptTokens = 0,
   completionTokens = 0,
+  durationMs = 0,
+  retries = 0,
 ): void {
   counters.modelCalls += 1;
   counters.promptTokens += promptTokens;
   counters.completionTokens += completionTokens;
+  counters.modelMs += durationMs;
+  counters.retries += retries;
 
   const scope = scopes.getStore();
   if (!scope) return;

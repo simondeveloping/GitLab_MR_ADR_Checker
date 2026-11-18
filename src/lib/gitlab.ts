@@ -11,10 +11,20 @@
 import { Gitlab } from "@gitbeaker/rest";
 import { gitLabCredentials } from "./env";
 import type { MergeRequestContext } from "./types";
+import type { ReviewAuthor } from "./review-trigger";
 
 function client(repoUrl: string) {
   const credentials = gitLabCredentials(repoUrl);
   return new Gitlab({ host: credentials.host, token: credentials.token });
+}
+
+/** Webhooks liefern das Bot-Kennzeichen nicht zuverlässig mit. */
+export async function loadReviewAuthor(userId: number, repoUrl: string): Promise<ReviewAuthor> {
+  const user = await client(repoUrl).Users.show(userId);
+  if (user.id !== userId || typeof user.username !== "string" || !user.username || typeof user.bot !== "boolean") {
+    throw new Error("GitLab liefert keine eindeutige Autoren-/Bot-Auskunft.");
+  }
+  return { id: user.id, username: user.username, bot: user.bot };
 }
 
 /**
@@ -95,7 +105,8 @@ export async function deleteNote(
 export interface DiscussionPosition {
   newPath: string;
   oldPath: string;
-  newLine: number;
+  newLine?: number;
+  oldLine?: number;
 }
 
 /**
@@ -135,6 +146,7 @@ export async function createInlineDiscussion(
         new_path: position.newPath,
         old_path: position.oldPath,
         new_line: position.newLine,
+        old_line: position.oldLine,
       },
     }),
   });

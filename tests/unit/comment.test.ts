@@ -38,7 +38,24 @@ test("Architekturbefunde bekommen getrennte Positionen und konkrete Verbesserung
   finding.rule = { ...finding.rule, origin: "project", adrFile: "001-architektur.md" };
   finding.consequence = "Aufrufer bekommen einen falschen Wert.";
   finding.suggestion = "Den Rückgabewert an die Schnittstelle anpassen.";
+  finding.rule.adrSource = { startLine: 10, endLine: 10, quote: "Nur diese Schnittstelle verwenden." };
   assert.equal(groupByAdr([finding, { ...finding, id: "another" }]).size, 2);
   assert.match(renderComment([finding]), /Mögliche Folge:.*falschen Wert/);
   assert.match(renderComment([finding]), /Verbesserung:.*Schnittstelle anpassen/);
+  assert.match(renderComment([finding]), /001-architektur\.md:10-10.*Nur diese Schnittstelle verwenden/);
+});
+
+test("lernfreundliche ADR-Erklärungen erscheinen vollständig im bestehenden Kommentar", () => {
+  const finding = makeReview().result!.findings[0];
+  finding.rule = { ...finding.rule, origin: "project", adrFile: "001-architektur.md", adrTitle: "Schnittstellen" };
+  finding.rationale = "ADR-Entscheidung und Konflikt. ".repeat(60);
+  finding.consequence = "Konkrete mögliche Folge. ".repeat(60);
+  finding.suggestion = "ADR-konforme Verbesserung. ".repeat(60);
+  const comment = renderComment([finding]);
+  assert.match(comment, /Architekturkonformität.*\[Projekt\] 001-architektur.md/);
+  assert.match(comment, /Betroffene Architekturentscheidung: \*\*Schnittstellen\*\*/);
+  for (const field of ["rationale", "consequence", "suggestion"] as const) {
+    assert.ok(finding[field]!.length > 1200);
+    assert.ok(comment.includes(finding[field]!.trim()));
+  }
 });

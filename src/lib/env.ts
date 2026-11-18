@@ -17,6 +17,10 @@ function optionalNumber(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function commaSeparated(name: string): string[] {
+  return (process.env[name] ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+}
+
 export interface GitLabConnection {
   host: string;
   token: string;
@@ -164,6 +168,20 @@ export function gitLabCredentials(repoUrl: string): GitLabConnection {
 export const env = {
   get webhookSecret() {
     return required("GITLAB_WEBHOOK_SECRET");
+  },
+  get reviewTriggerFilter() {
+    return {
+      ignoredAuthors: ["renovate", "renovate-bot", "dependabot", "dependabot-bot",
+        ...commaSeparated("GITLAB_IGNORED_MR_AUTHORS").map((username) => username.toLowerCase())],
+      ignoredSourceBranchPrefixes: ["renovate/", "dependabot/",
+        ...commaSeparated("GITLAB_IGNORED_SOURCE_BRANCH_PREFIXES")],
+    };
+  },
+  /** Nur im Backend anhand des von GitLab geladenen MR-Usernames auswerten. */
+  isLearningUser(username: string | undefined): boolean {
+    const normalized = username?.trim().toLowerCase();
+    return Boolean(normalized && commaSeparated("LEARNING_USERS")
+      .some((entry) => entry.toLowerCase() === normalized));
   },
   get llmBaseUrl() {
     return required("LLM_BASE_URL").replace(/\/+$/, "");

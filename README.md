@@ -6,6 +6,8 @@ anhand der Projektkonfiguration: Projekte mit gültigen Architecture Decision
 Records (ADRs) erhalten einen Architektur-Review gegen Projekt-ADRs und
 Gruppenstandards. Projekte ohne gültige Projekt-ADRs erhalten einen
 lernfreundlichen Code-Review mit Erklärungen zu konkreten möglichen Bugs.
+Mit `LEARNING_USERS` lassen sich auch die Erklärungen bestätigter ADR-Verstöße
+für ausgewählte MR-Autoren lernfreundlicher formulieren.
 
 Das System ist ein Forschungsprototyp und kein allgemeines statisches
 Analysetool: Ein OpenAI-kompatibles Sprachmodell extrahiert und bewertet Regeln.
@@ -32,34 +34,42 @@ Die Prüfung läuft in diesen Schritten:
    ADR-Dateien werden dabei nicht als Prüfgegenstand behandelt und aus dem
    Merge-Request-Diff für die Code-Prüfung ausgeschlossen. Enthält ein MR nur
    ADR-Änderungen oder herausgefiltertes Rauschen, gibt es nichts zu prüfen.
-2. Im Architekturmodus werden aus den ADRs einzelne, prüfbare Regeln
-   extrahiert. Die Triage ordnet Regeln anhand von Diffteilen, geänderten
-   Zeilen und möglichen Schnittstellenbezügen zu. Eine gemeinsame Suche je
-   Diffteil sammelt Verdachtsfälle für mehrere Regeln; jeder Verdachtsfall
+2. Im Architekturmodus werden aus den ADRs MR-unabhängig einzelne, prüfbare Regeln mit
+   überprüftem Originalzitat und ADR-Zeilenangabe extrahiert. Ein unabhängiger
+   Quellencheck bewertet bis zu zwölf Regeln pro Modellaufruf. Die Triage ordnet
+   Regeln anhand von Diffteilen, geänderten Zeilen und möglichen
+   Schnittstellenbezügen zu. Eine gemeinsame Suche je Diffteil sammelt
+   Verdachtsfälle für mehrere Regeln; eine zusätzliche Integrationssuche
+   verbindet mehrere Diffteile und ihre Schnittstellen. Jeder Verdachtsfall
    wird anschließend unabhängig am Originalcode samt Gegenbelegsuche geprüft.
-   Nur ein belegter, an einer hinzugefügten Zeile verankerter Verstoß wird als
+   Erst bestätigte Befunde werden nach gemeinsamer Ursache dedupliziert.
+   Nur ein belegter, an einer hinzugefügten oder gelöschten Zeile verankerter Verstoß wird als
    `NC` (nicht konform) gemeldet. Wo kein Verstoß nachgewiesen ist, wird
    konservativ `CIA` (nicht entscheidbar) statt einer unbelegten Aussage über
-   die Einhaltung (`C`) verwendet.
+   die Einhaltung (`C`) verwendet. Reine Löschungen werden am Basisstand gelesen
+   und benötigen zusätzlich aktuelle Belege zum verbleibenden Code. Der
+   Entscheidungs- und Ausnahmekontext der ADRs bleibt während der Analyse im
+   Arbeitsspeicher; er wird nicht für jeden Befund erneut gespeichert.
 3. Im Lernmodus wird der Diff an Hunkgrenzen und bei großen Hunks an Zeilengrenzen
    aufgeteilt. Jeder Teil wird mit eigenem Modellkontext und Suchbudget im
    Zusammenhang mit dem **gesamten ausgecheckten Repository** untersucht. Die
    Werkzeuge können auch unveränderte Dateien, Aufrufer, Imports, Routen,
    API-Verträge, Tests und Konfiguration lesen. Danach prüft ein eigener
-   Integrationsdurchlauf dateiübergreifende Verbindungen anhand kompakter
+   bedarfsgesteuerter Integrationsdurchlauf dateiübergreifende Verbindungen anhand kompakter
    Teilberichte und gezielt nachgeladener Originalstellen. Gesammelte Kandidaten
    werden einzeln gegen den Originalcode verifiziert, einschließlich einer Suche
-   nach Gegenbelegen. Erst nach der ursachenbasierten Dublettenprüfung werden
-   bestätigte Befunde zu Kommentaren ausformuliert. Jeder Hinweis muss auf eine
-   hinzugefügte Diff-Zeile zurückführbar sein; die Verifikation muss die betroffene
+   nach Gegenbelegen. Der Verifikationsdurchlauf formuliert bereits den fertigen,
+   lernfreundlichen Kommentar. Nach der ursachenbasierten Dublettenprüfung werden
+   die geprüften Angaben direkt übernommen. Jeder Hinweis muss auf eine
+   hinzugefügte oder gelöschte Diff-Zeile zurückführbar sein; die Verifikation muss die betroffene
    Stelle und erforderliche repo-übergreifende Belege tatsächlich gelesen haben.
    Hinweise erklären eine mögliche Folge und enthalten einen konkreten,
    direkt umsetzbaren Verbesserungsvorschlag; bei Bedarf nennen sie auch einen
    passenden Regressionstest. Reine Stilpräferenzen ohne konkreten Nachteil werden
    nicht gemeldet. Fehler einzelner Analysen werden separat erfasst; erfolgreiche
    Teilergebnisse bleiben für die folgenden Phasen erhalten.
-4. Im Architekturmodus werden `NC`-Befunde einzeln an ihren jeweiligen
-   geänderten Zeilen platziert, mit Folge und Verbesserungsvorschlag. Im Lernmodus
+4. Im Architekturmodus werden `NC`-Befunde einzeln an ihrer bestätigten
+   geänderten Zeile platziert, mit ADR-Grundlage, Folge und Verbesserungsvorschlag. Im Lernmodus
     werden konkrete Hinweise mit möglicher Folge und Verbesserungsvorschlag
     einzeln veröffentlicht; die Kommentare sind ausdrücklich
    nicht blockierend. Befunde erscheinen, sofern möglich, als Inline-
@@ -69,8 +79,8 @@ Die Prüfung läuft in diesen Schritten:
 
 Der Webhook antwortet mit HTTP `202`, ohne auf den mehrminütigen Prüflauf zu
 warten. Dadurch blockiert der Review keine CI/CD-Pipeline. Ausgelöst werden nur
-neu geöffnete Merge Requests (`action: open`); Entwürfe und andere Aktionen
-werden ignoriert.
+neu geöffnete Merge Requests (`action: open`); Entwürfe, automatisierte MRs und
+andere Aktionen werden ignoriert.
 
 ## Voraussetzungen
 
@@ -238,6 +248,166 @@ und die letzte Zustellung. Der Agent startet eine Prüfung für neu geöffnete,
 nicht als Entwurf markierte Merge Requests. Änderungen an bereits geöffneten
 Merge Requests und andere Aktionen starten keinen neuen Lauf.
 
+### Automatisierte Merge Requests ausschließen
+
+Vor dem Anlegen eines Reviews werden automatisch übersprungen:
+
+- Quellbranches mit dem Präfix `renovate/` oder `dependabot/`.
+- Autoren mit den Benutzernamen `renovate`, `renovate-bot`, `dependabot` oder
+  `dependabot-bot` (ohne Beachtung der Groß-/Kleinschreibung).
+- Autoren, die GitLab als Bot kennzeichnet (`bot: true`), einschließlich
+  Projekt-/Gruppen-Token-Bots. Das Kennzeichen wird bei Bedarf über die Users-API
+  geladen, weil es im Webhook normalerweise fehlt. Maßgeblich ist `author_id`
+  des Merge Requests, nicht der Benutzer einer späteren Aktion oder eines Commits.
+
+Eigene Automatisierung mit regulären Benutzerkonten ist für GitLab nicht immer
+als Bot erkennbar. Ergänze solche Accounts oder abweichende Branch-Präfixe in `.env`:
+
+```dotenv
+GITLAB_IGNORED_MR_AUTHORS=svc-dependencies,company-renovate
+GITLAB_IGNORED_SOURCE_BRANCH_PREFIXES=automation/,dependency-updates/
+```
+
+Beide Listen sind kommagetrennt und ergänzen die eingebauten Ausschlüsse.
+Benutzernamen werden exakt verglichen, Branch-Präfixe beachten die
+Groß-/Kleinschreibung. Ein menschlicher MR wie `fix/renovate-config` wird allein
+wegen dieses Namens nicht ausgeschlossen.
+
+Der Filter gilt vor der Modusauswahl für ADR-Check und Lernmodus. Übersprungene
+MRs erhalten HTTP `200` mit `status: ignored` und einem Grund. Sie erzeugen keinen
+Review-Datensatz, Container, Modellaufruf oder GitLab-Kommentar; der Grund steht
+im vorhandenen, größenbegrenzten `application.log`. Scheitert die Autorenabfrage,
+antwortet der Webhook mit HTTP `503`, ohne einen Review zu starten.
+
+### Lernfreundliche ADR-Erklärungen für ausgewählte Autoren
+
+Mit der optionalen Backend-Variable `LEARNING_USERS` erhalten ausgewählte MR-Autoren
+verständlichere Erklärungen zu bestätigten ADR-Verstößen. Voraussetzung sind die
+oben eingerichteten GitLab-Zugänge, der Merge-Request-Webhook und die Sandbox.
+
+#### Schritt für Schritt aktivieren
+
+1. **GitLab-Benutzernamen ermitteln.** Öffne das GitLab-Profil der gewünschten
+   Person, beispielsweise über den Autorenlink eines Merge Requests. Verwende den
+   dort als `@username` angezeigten Benutzernamen **ohne das führende `@`**:
+
+   | Im GitLab-Profil | Eintrag in `LEARNING_USERS` |
+   | --- | --- |
+   | `@anna` | `anna` |
+   | `@mustermann.max` | `mustermann.max` |
+   | `@neue-kollegin` | `neue-kollegin` |
+
+   Ein Anzeigename wie „Anna Beispiel“ oder eine E-Mail-Adresse eignet sich nicht
+   für die Zuordnung. Entscheidend ist der Account des **MR-Autors**.
+
+2. **Im Backend konfigurieren.** Bei Podman Compose bearbeitest du `.env` im
+   Projektverzeichnis; beim lokalen Start mit `npm run dev` die `.env.local`.
+   `.env.example` ist die Vorlage. Ersetze den leeren Eintrag `LEARNING_USERS=`
+   durch die gewünschten Usernames auf einer Zeile:
+
+   ```dotenv
+   LEARNING_USERS=anna,mustermann.max,neue-kollegin
+   ```
+
+   Die aktive Zeile darf kein `#` am Anfang haben. Trage die Variable nur einmal
+   in der jeweiligen Datei ein. Zum Deaktivieren setzt du wieder `LEARNING_USERS=`.
+
+3. **Konfiguration übernehmen.** Beim erstmaligen Einsatz der Funktion müssen
+   Backend und Sandbox-Image den aktualisierten Code enthalten. Mit Compose:
+
+   ```bash
+   podman compose up --build -d
+   ```
+
+   Änderst du danach nur die Benutzernamenliste, genügt es, den App-Container neu
+   zu erstellen, damit Compose die Werte aus `.env` erneut einliest:
+
+   ```bash
+   podman compose up -d --force-recreate app
+   ```
+
+   Ein bloßes `podman compose restart app` übernimmt geänderte Werte aus `env_file`
+   nicht. Beim lokalen Entwicklungsstart baust du einmalig das aktualisierte
+   Sandbox-Image mit `npm run sandbox:build` und startest `npm run dev` neu.
+   Bei späteren Änderungen an `.env.local` genügt der Neustart des Entwicklungsservers.
+
+4. **Einen neuen Merge Request prüfen lassen.** Ein gelisteter Autor öffnet einen
+   neuen, nicht als Entwurf markierten MR. Für lernfreundliche **ADR-Erklärungen**
+   muss das Projekt gültige, angenommene ADRs unter `docs/adr/` und der MR prüfbare
+   Codeänderungen enthalten. Der Webhook bestätigt den Start mit HTTP `202`.
+   Den Fortschritt findest du in der Anwendung unter **Merge Requests**. Bei einem
+   bestätigten ADR-Verstoß erklärt der Befund die Entscheidung, den Konflikt,
+   eine mögliche Folge und eine ADR-konforme Verbesserung. Er erscheint auf der
+   Review-Seite und möglichst als Inline-Kommentar in GitLab. Wird kein Verstoß
+   bestätigt, gibt es auch keine zusätzliche Lern-Erklärung.
+
+Die Einstellung gilt für **neu angelegte Reviews**. Bereits laufende oder
+abgeschlossene Reviews werden durch eine Listenänderung nicht angepasst. Ein
+Update oder erneutes Öffnen eines bestehenden MRs löst keinen neuen Review aus.
+
+#### Zuordnung und Verhalten
+
+Der Vergleich ist exakt, aber unabhängig von Groß-/Kleinschreibung; führende und
+abschließende Leerzeichen werden entfernt und leere Listeneinträge ignoriert.
+Eine fehlende, leere oder nur aus Leerzeichen/Kommas bestehende Variable deaktiviert
+die zusätzliche Lern-Erklärung für alle. Maßgeblich ist ausschließlich der über
+den bestehenden GitLab-Autoren-Lookup geladene `username` zu `author_id` des MRs,
+nicht Anzeigename, E-Mail-Adresse oder auslösender Webhook-Benutzer. Bot- und
+Autorenfilter gelten weiterhin vorrangig.
+
+Das Backend speichert die Auswahl als boolesches Kennzeichen am Review und reicht
+nur dieses als `ADR_LEARNING_EXPLANATION` an die Sandbox weiter. Die Benutzernamenliste
+bleibt im Backend. `ADR_LEARNING_EXPLANATION` ist eine interne Übergabevariable;
+für die Einrichtung genügt `LEARNING_USERS`.
+
+Projekte mit gültigen ADRs bleiben im Modus `architecture`. Der bestehende
+Verifikationsaufruf formuliert für gelistete Autoren Begründung, mögliche Folge
+und Verbesserung in einfacher, didaktischer Sprache: Welche ADR-Entscheidung gilt,
+warum die Änderung ihr widerspricht und wie sie ADR-konform verbessert werden kann.
+Alle Aussagen müssen durch das ADR und tatsächlich gelesene Belege gestützt sein;
+unbelegte Absichten, Risiken und Lösungen dürfen nicht ergänzt werden. Prüfablauf,
+Urteile, Beleganforderungen, Modelle und Budgets bleiben erhalten. Es gibt keine
+zusätzliche allgemeine Bug-Analyse und keinen zusätzlichen Modellaufruf für die
+Erklärung. Die vorhandenen Ergebnisfelder und das Rendering werden verwendet;
+pro Erklärungsfeld sind für diese Autoren bis zu 2.400 statt 1.200 Zeichen möglich.
+
+Für nicht gelistete Autoren bleibt der bisherige ADR-Prompt erhalten. Der
+automatische Lernreview für Projekte **ohne gültige Projekt-ADRs** funktioniert
+unabhängig von `LEARNING_USERS` weiterhin für alle Autoren mit seinen bisherigen
+Prompts, Modellen und Budgets.
+
+#### Ablauf vom Webhook bis zum Befund
+
+Das folgende Mermaid-Diagramm zeigt den Datenfluss. GitLab und GitHub stellen den
+`mermaid`-Block im gerenderten README als Diagramm dar.
+
+```mermaid
+flowchart TD
+    MR["GitLab: neuer Merge Request"] --> Eingang["Backend: Webhook prüfen und tatsächlichen MR-Autor laden"]
+    Eingang --> Erlaubt{"Authentifiziert, neu geöffnet, kein Entwurf und kein ausgeschlossener Autor oder Branch?"}
+    Erlaubt -- Nein --> Ende["Abweisen oder überspringen"]
+    Erlaubt -- Ja --> Auswahl["Backend: Autoren-Username mit LEARNING_USERS vergleichen"]
+    Liste["Backend-Konfiguration: LEARNING_USERS"] -.-> Auswahl
+    Auswahl --> Start["Orchestrator: Review mit booleschem Kennzeichen anlegen; HTTP 202"]
+    Start --> Sandbox["Sandbox starten: nur Kennzeichen übergeben; Commit klonen und Diff vorbereiten"]
+    Sandbox --> ADRs{"Gültige Projekt-ADRs vorhanden?"}
+    ADRs -- Ja --> Architektur["architecture: Projekt-ADRs und Gruppenstandard; Regeln extrahieren, zuordnen und Kandidaten suchen"]
+    Architektur --> Lernstatus{"Lern-Erklärung aktiviert?"}
+    Lernstatus -- Ja --> Didaktisch["Bestehende ADR-Verifikation mit didaktischer Erklärung"]
+    Lernstatus -- Nein --> Standard["Bestehende ADR-Verifikation mit Standard-Prompt"]
+    Didaktisch --> ADRBefunde["Gleiche Urteile und Beleganforderungen; bestätigte Befunde deduplizieren"]
+    Standard --> ADRBefunde
+    ADRs -- Nein --> Lernen["learning: bestehender Code-Lernreview, unabhängig von LEARNING_USERS"]
+    ADRBefunde --> Callback["Authentifizierter Callback an das Backend"]
+    Lernen --> Callback
+    Callback --> Ergebnis["Ergebnisse speichern und auf der Review-Seite anzeigen; bestätigte Verstöße in GitLab kommentieren"]
+```
+
+Die beiden ADR-Verifikationszweige sind Alternativen innerhalb desselben
+Prüfschritts. Die didaktische Erklärung entsteht direkt in diesem Aufruf.
+Ein zusätzlicher Aufruf zum Umformulieren entfällt. Enthält der MR ausschließlich
+ADRs oder herausgefiltertes Rauschen, wird keine Codeprüfung gestartet.
+
 ## Anwendung bedienen
 
 1. Öffne in GitLab einen neuen Merge Request in einem Projekt, für das Token und
@@ -279,9 +449,95 @@ Fehler aus den Prüf-Containern. Normale Fortschrittsmeldungen und einzelne
 Werkzeug-/Modellaufrufe werden nicht in diese Dateien geschrieben. Jede Datei
 wird bei 1 MiB rotiert; zusätzlich bleibt jeweils höchstens eine ältere Datei
 mit der Endung `.1` erhalten. Zugangsdaten werden vor dem Schreiben maskiert,
-und Logdateien sind von Git ausgeschlossen.
+und Logdateien sind von Git ausgeschlossen. Beim Serverstart und danach täglich
+werden Einträge älter als 14 Tage aus den Anwendungs- und Containerlogs sowie
+deren `.1`-Rotationen entfernt. Die Bereinigung betrifft ausschließlich
+`logs/`; Review-Daten unter `data/` bleiben erhalten. Zeilen ohne gültigen
+Zeitstempel werden zur Sicherheit nicht gelöscht.
+
+### ADR-Check: Laufzeit und Speicherbedarf
+
+Der ADR-Check verwendet einen begrenzten Cache im vorhandenen Datenverzeichnis:
+
+- **Eine Datei:** `data/adr-rule-cache.json` (bzw. unter `DATA_DIR`).
+- **Maximal 2 MiB** JSON und **128 ADR-Einträge** insgesamt, nicht pro Projekt.
+- **Maximal 64 KiB je Regelpaket**; größere Pakete werden regulär geprüft und
+  nicht gecacht. Nur vollständig erfolgreiche Extraktionen werden aufgenommen.
+- **30 Tage Gültigkeit**; abgelaufene und am längsten ungenutzte Einträge werden
+  bei Cache-Zugriffen automatisch entfernt. Auch ohne weitere Zugriffe bleibt
+  der Speicher durch die Größenobergrenze begrenzt.
+- Atomare Schreibvorgänge benötigen vorübergehend eine weitere Datei von maximal
+  2 MiB. Ein Lock-Verzeichnis verhindert konkurrierende Schreibvorgänge;
+  belegter oder nicht verfügbarer Cache bedeutet reguläre Extraktion.
+- **Keine zusätzlichen Podman-Volumes, Repository-Klone oder Modellverläufe.**
+  Cache-Zugriffe laufen authentifiziert über das vorhandene Backend. Einträge
+  sind nach Repository getrennt und enthalten nur Regeln und kurze Quellenzitate.
+
+Änderungen am ADR-Inhalt, Modell, Gateway, Sampling oder an der Extraktionsversion
+erzeugen einen neuen Cache-Schlüssel. Die Quellen werden auch bei Cache-Treffern
+gegen das aktuelle Dokument validiert. `ADR_RULE_CACHE=0` deaktiviert den Cache;
+die Cache-Datei kann bei gestoppter App jederzeit gelöscht werden. Die vorhandene
+Review-Historie in `data/reviews/` wird durch diese Cache-Bereinigung nicht gelöscht.
+
+Extraktion und Triage berücksichtigen Bedingungen und Ausnahmen aus dem ADR-Kontext.
+Die gemeinsame Suche verwendet Pakete von höchstens acht Regeln und ein zur
+Paketgröße passendes Lesebudget (mindestens `BUDGET_FILE_READS`, automatisch bis
+zu zwölf). Die Verifikation erhält die betroffene Originalstelle bereits als
+protokollierte Dateiöffnung; diese zählt zum Budget. Dubletten werden nach der
+Verifikation in kleinen Paketen statt durch einen Modellaufruf je Befundpaar geprüft.
+
+`LLM_FAST_MODEL` kann optional ein Modell für Extraktion, Triage und Dublettenprüfung
+festlegen; `LLM_VERIFY_MODEL` eines für die Verifikation. Ohne Angabe gilt jeweils
+`LLM_MODEL`. Die Suchphase verwendet weiterhin `LLM_MODEL`.
+
+Die Review-Detailseite zeigt Cache-Treffer und die Laufzeiten von Suche, Integration,
+Verifikation und Dublettenprüfung. Im Ergebnis werden außerdem die verwendeten Modelle,
+die summierte Dauer erfolgreicher Modellanfragen einschließlich ihrer Wiederholungen
+(`modelMs`) und deren Wiederholungszahl (`retries`) gespeichert. Diese summierten
+Zeiten sind bei Parallelität nicht mit der Gesamtlaufzeit gleichzusetzen.
+Unentschiedene Ergebnisse unterscheiden zwischen einer Suche ohne belegten Verstoß
+und unvollständiger Prüfung; kompakte Zugriffszähler ersetzen zusätzliche vollständige
+Werkzeugprotokolle für solche Ergebnisse.
+ADRs, deren aufbereiteter Kontext 48.000 Bytes überschreitet, werden als nicht
+vollständig prüfbar ausgewiesen; Ausnahmen werden nicht still abgeschnitten.
 
 ### Lernreview-Budgets
+
+Der Lernmodus untersucht konkrete Bugs und erklärt ihre Ursache und Korrektur.
+Er hat eigene Prompts, Integrationsauswahl, Modelle und Laufstatistiken; er verwendet
+keine ADR-Regeln und keinen Regel-Cache. Die Modelle lassen sich getrennt einstellen:
+
+- `LEARNING_MODEL`: Suche und Integration; Standard ist `LLM_MODEL`.
+- `LEARNING_VERIFY_MODEL`: unabhängige Verifikation samt fertigem Kommentar;
+  Standard ist `LEARNING_MODEL` beziehungsweise `LLM_MODEL`.
+- `LEARNING_DEDUP_MODEL`: Ursachenvergleich; derselbe Fallback.
+
+Die ADR-Overrides `LLM_FAST_MODEL` und `LLM_VERIFY_MODEL` beeinflussen den Lernmodus
+nicht. Die betroffene Originalstelle wird vor dem ersten Verifikationsaufruf geladen
+und zählt zum Lesebudget. Es gibt anschließend keinen zusätzlichen Modellaufruf
+zum Umformulieren; Titel, Erklärung, Folge und Korrektur stammen aus der Verifikation.
+
+`LEARNING_INTEGRATION_MODE=auto` spart die zweite Suche ausschließlich bei einer
+kleinen lokalen Änderung (eine bestehende, weiterhin vorhandene Quelldatei ohne
+Umbenennung, ein Diffteil, höchstens 40
+geänderte Zeilen und 8.000 Diff-Bytes), wenn die erste Analyse vollständig ist,
+keine offenen Fragen meldet und explizit keine weitere Integrationsprüfung benötigt.
+Erkennbare Schnittstellen-, Konfigurations- oder Vertragsänderungen sowie mehrere
+Dateien/Diffteile erhalten weiterhin eine Integrationsprüfung. `always` aktiviert
+diesen Durchlauf für jeden prüfbaren MR, etwa für Qualitäts-Vergleichsläufe.
+
+Auch reine Löschungen werden geprüft: Ein Kandidat benötigt eine tatsächliche
+gelöschte Zeile im zugewiesenen Diffteil, gelesene Belege aus dem Basisstand und
+zusätzliche aktuelle Belege zum verbleibenden Code. Bestätigte Hinweise werden
+an ihrer alten Diffposition veröffentlicht. Ungelesene oder dem falschen Codestand
+zugeordnete Zeilen sind keine zulässigen Belege.
+
+Widerlegte und mangels Belegen offene Verdachtsfälle werden getrennt gezählt.
+Die Detailseite zeigt Lernphasen, Integrationsentscheidung und unvollständige
+Analysen; höchstens zehn offene Beispiele mit je 400 Zeichen Begründung werden
+im bestehenden Review-Datensatz gespeichert. Offene Verdachtsfälle erzeugen keinen
+GitLab-Kommentar. Zusätzliche Volumes, Caches oder vollständige Zwischenberichte
+werden dafür nicht gespeichert.
 
 `LEARNING_CHUNK_BYTES` begrenzt die Größe eines annotierten Diffteils (Standard:
 32.000 Bytes, maximal 48.000). Große MRs werden auf mehrere Einheiten verteilt,

@@ -33,6 +33,18 @@ export const config = {
   llmBaseUrl: required("LLM_BASE_URL").replace(/\/+$/, ""),
   llmApiKey: required("LLM_API_KEY"),
   llmModel: process.env.LLM_MODEL ?? "gpt-5.4-mini",
+  fastModel: process.env.LLM_FAST_MODEL || process.env.LLM_MODEL || "gpt-5.4-mini",
+  verifyModel: process.env.LLM_VERIFY_MODEL || process.env.LLM_MODEL || "gpt-5.4-mini",
+  ruleCache: process.env.ADR_RULE_CACHE !== "0",
+  /** Backend-Auswahl für die ADR-Erklärung; kein Wechsel zum ADR-losen Lernreview. */
+  learningExplanation: process.env.ADR_LEARNING_EXPLANATION === "1",
+  /** Eigene Modellauswahl des Lernmodus; ADR-spezifische Overrides gelten hier nicht. */
+  learningModels: {
+    search: process.env.LEARNING_MODEL || process.env.LLM_MODEL || "gpt-5.4-mini",
+    verify: process.env.LEARNING_VERIFY_MODEL || process.env.LEARNING_MODEL || process.env.LLM_MODEL || "gpt-5.4-mini",
+    deduplicate: process.env.LEARNING_DEDUP_MODEL || process.env.LEARNING_MODEL || process.env.LLM_MODEL || "gpt-5.4-mini",
+  },
+  learningIntegration: (process.env.LEARNING_INTEGRATION_MODE === "always" ? "always" : "auto") as "auto" | "always",
 
   /**
    * Sampling-Temperatur jedes Modellaufrufs.

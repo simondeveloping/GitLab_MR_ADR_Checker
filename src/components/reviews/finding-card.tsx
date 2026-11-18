@@ -36,7 +36,7 @@ export function FindingCard({ finding, diffHunks, reviewId, initialFeedback }: {
       <div className="card-row">
         <a className="finding-location" href={`#${finding.id}`}>
           <code>{location
-            ? `${location.path}:${location.startLine}${location.endLine !== location.startLine ? `-${location.endLine}` : ""}`
+            ? `${location.path}:${location.startLine}${location.endLine !== location.startLine ? `-${location.endLine}` : ""}${location.revision === "base" ? " (vorher)" : ""}`
             : ruleSource(finding)}</code>
         </a>
         <span className={`badge badge-${finding.verdict}`}>

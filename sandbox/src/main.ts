@@ -31,7 +31,7 @@ import { extractRules } from "./extract.js";
 import { reviewArchitecture } from "./architecture.js";
 import { reviewForLearning } from "./learning.js";
 import { loadRuleBase } from "./rulebase.js";
-import { setExcludedAdrPaths } from "./tools.js";
+import { setExcludedAdrPaths, setBaseSha } from "./tools.js";
 import { counters, log } from "./trace.js";
 import type { AgentFailure, Finding, SandboxResult } from "./types.js";
 
@@ -47,7 +47,8 @@ async function main(): Promise<void> {
 
   // 1 Checkout
   const checkoutStartedAt = performance.now();
-  const { changedFiles, filteredFiles, excludedAdrFiles } = await checkout();
+  const { changedFiles, filteredFiles, excludedAdrFiles, baseSha } = await checkout();
+  setBaseSha(baseSha);
   const checkoutMs = Math.round(performance.now() - checkoutStartedAt);
 
   // 2 Regelbasis
@@ -72,7 +73,7 @@ async function main(): Promise<void> {
     const analysisStartedAt = performance.now();
     const learning = relevantFiles.length > 0
       ? await reviewForLearning()
-      : { findings: [], failures: [] };
+      : { findings: [], failures: [], metrics: undefined };
     const analysisMs = Math.round(performance.now() - analysisStartedAt);
     failures.push(...learning.failures);
     const result: SandboxResult = {
@@ -85,7 +86,11 @@ async function main(): Promise<void> {
       droppedRules: [],
       findings: learning.findings,
       failures,
-      stats: buildStats(startedAt, learning.findings.length, { checkoutMs, rulebaseMs, analysisMs }),
+      stats: {
+        ...buildStats(startedAt, learning.findings.length, { checkoutMs, rulebaseMs, analysisMs }),
+        learning: learning.metrics,
+        models: { default: config.learningModels.search, fast: config.learningModels.deduplicate, verify: config.learningModels.verify },
+      },
     };
     log.info("run_summary", {
       mode: "learning",
@@ -104,7 +109,7 @@ async function main(): Promise<void> {
   const extractionStartedAt = performance.now();
   const extraction =
     relevantFiles.length > 0
-      ? await extractRules(ruleBase.documents, relevantFiles)
+      ? await extractRules(ruleBase.documents)
       : { rules: [], failures: [], adrTokenUsage: [] };
   const extractionMs = Math.round(performance.now() - extractionStartedAt);
   failures.push(...extraction.failures);
@@ -117,8 +122,8 @@ async function main(): Promise<void> {
   // 4/5 Diffbasierte Zuordnung, gemeinsame Suche und unabhängige Verifikation.
   const judgingStartedAt = performance.now();
   const architecture = relevantFiles.length > 0
-    ? await reviewArchitecture(extraction.rules)
-    : { findings: [] as Finding[], dropped: [], failures: [], triageMs: 0 };
+    ? await reviewArchitecture(extraction.rules, config.learningExplanation)
+    : { findings: [] as Finding[], dropped: [], failures: [], triageMs: 0, metrics: undefined };
   const findings = architecture.findings;
   failures.push(...architecture.failures);
   const triageMs = architecture.triageMs;
@@ -136,12 +141,12 @@ async function main(): Promise<void> {
     findings,
     failures,
     adrTokenUsage: extraction.adrTokenUsage,
-    stats: buildStats(
+    stats: { ...buildStats(
       startedAt,
       findings.length,
       { checkoutMs, rulebaseMs, extractionMs, triageMs, judgingMs },
       ruleBase.documents.length,
-    ),
+    ), architecture: architecture.metrics },
   };
 
   log.info("run_summary", {

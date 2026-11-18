@@ -30,6 +30,7 @@ export async function createReview(
   projectId: number,
   mrIid: number,
   repoUrl: string,
+  options: { learningExplanation?: boolean } = {},
 ): Promise<Review> {
   const mr = await loadMergeRequestContext(projectId, mrIid, repoUrl);
   const now = new Date().toISOString();
@@ -40,6 +41,7 @@ export async function createReview(
     createdAt: now,
     updatedAt: now,
     mr,
+    learningExplanation: options.learningExplanation === true,
     callbackToken: randomBytes(32).toString("hex"),
     feedback: [],
   };

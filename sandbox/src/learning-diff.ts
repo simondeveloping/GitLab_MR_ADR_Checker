@@ -156,11 +156,12 @@ export function addedLinesByPath(files: LearningFile[]): Map<string, Set<number>
 }
 
 /** Originaldiff um einen Kandidaten, unabhängig von Modell-Zusammenfassungen. */
-export function candidateDiff(files: LearningFile[], path: string, line: number): string {
-  const file = files.find((entry) => entry.path === path);
+export function candidateDiff(files: LearningFile[], path: string, line: number, side?: "old"): string {
+  const file = files.find((entry) => (side === "old" ? entry.oldPath : entry.path) === path);
   if (!file) return "";
   for (const hunk of file.hunks) {
-    const index = hunk.lines.findIndex((entry) => entry.kind === "+" && entry.newLine === line);
+    const index = hunk.lines.findIndex((entry) => side === "old"
+      ? entry.kind === "-" && entry.oldLine === line : entry.kind === "+" && entry.newLine === line);
     if (index < 0) continue;
     let start = index;
     let end = index + 1;

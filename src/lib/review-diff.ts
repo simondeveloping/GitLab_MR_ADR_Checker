@@ -80,11 +80,13 @@ function linesForFinding(
 
     return finding.evidence.some((evidence) => {
       const matchesNewLine =
+        evidence.revision !== "base" &&
         line.newLine !== null &&
         evidence.path === hunk.newPath &&
         line.newLine >= evidence.startLine &&
         line.newLine <= evidence.endLine;
       const matchesOldLine =
+        evidence.revision === "base" &&
         line.oldLine !== null &&
         evidence.path === hunk.oldPath &&
         line.oldLine >= evidence.startLine &&

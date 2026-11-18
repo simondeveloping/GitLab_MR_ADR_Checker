@@ -5,7 +5,7 @@
  * Merge-Request-Ereignisse. Der Endpunkt prüft zuerst das mitgesandte
  * Geheimnis, damit er nicht von außen als Auslöser missbraucht werden kann,
  * und filtert anschließend auf den Ereignistyp, sodass nur neu geöffnete
- * Merge Requests einen Review auslösen.
+ * Merge Requests menschlicher Autoren einen Review auslösen.
  *
  * Der naheliegende Alternativweg wäre ein zusätzlicher Job in der
  * CI/CD-Pipeline gewesen. Ein Prüfvorgang mit mehreren Modellaufrufen je
@@ -18,6 +18,8 @@ import { secretMatches } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { createReview, startReview } from "@/lib/orchestrator";
 import { writeOperationalLog } from "@/lib/operational-log";
+import { loadReviewAuthor } from "@/lib/gitlab";
+import { automatedReviewReason, type ReviewAuthor } from "@/lib/review-trigger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,6 +27,7 @@ export const dynamic = "force-dynamic";
 interface MergeRequestEvent {
   object_kind?: string;
   event_type?: string;
+  user?: ReviewAuthor;
   project?: {
     id?: number;
     git_http_url?: string;
@@ -33,6 +36,8 @@ interface MergeRequestEvent {
   };
   object_attributes?: {
     iid?: number;
+    author_id?: number;
+    source_branch?: string;
     action?: string;
     oldrev?: string;
     state?: string;
@@ -67,6 +72,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   let event: MergeRequestEvent;
   try {
     event = (await request.json()) as MergeRequestEvent;
+    if (!event || typeof event !== "object" || Array.isArray(event)) throw new Error("invalid payload");
   } catch {
     return NextResponse.json({ error: "invalid payload" }, { status: 400 });
   }
@@ -88,7 +94,39 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "incomplete payload" }, { status: 400 });
   }
 
-  const review = await createReview(projectId, mrIid, repoUrl);
+  const attributes = event.object_attributes!;
+  const filter = env.reviewTriggerFilter;
+  const ignored = (reason: string) => {
+    writeOperationalLog("application.log", {
+      event: "review_ignored", reason, projectId, mrIid,
+      authorId: attributes.author_id, sourceBranch: attributes.source_branch,
+    });
+    return NextResponse.json({ status: "ignored", reason });
+  };
+  // Der Ereignisbenutzer kann vom MR-Autor abweichen (z. B. beim Import).
+  const authorId = attributes.author_id;
+  const eventAuthor = typeof authorId === "number" && event.user?.id === authorId ? event.user : undefined;
+  const earlyReason = automatedReviewReason(attributes.source_branch, eventAuthor, filter);
+  if (earlyReason) return ignored(earlyReason);
+
+  if (typeof authorId !== "number" || !Number.isSafeInteger(authorId) || authorId < 1) {
+    return NextResponse.json({ error: "missing MR author" }, { status: 400 });
+  }
+  let author: ReviewAuthor;
+  try {
+    author = await loadReviewAuthor(authorId, repoUrl);
+  } catch (error) {
+    writeOperationalLog("application.log", {
+      event: "review_author_lookup_failed", projectId, mrIid, error: String(error),
+    });
+    return NextResponse.json({ error: "MR author lookup failed" }, { status: 503 });
+  }
+  const reason = automatedReviewReason(attributes.source_branch, author, filter);
+  if (reason) return ignored(reason);
+
+  const review = await createReview(projectId, mrIid, repoUrl, {
+    learningExplanation: env.isLearningUser(author.username),
+  });
   writeOperationalLog("application.log", {
     event: "review_accepted",
     reviewId: review.id,

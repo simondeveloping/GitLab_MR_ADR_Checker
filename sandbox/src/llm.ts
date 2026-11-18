@@ -56,10 +56,10 @@ const RETRYABLE = new Set([408, 429, 500, 502, 503, 504]);
  */
 export async function complete(
   messages: Message[],
-  options: { tools?: ToolSchema[]; jsonOnly?: boolean } = {},
+  options: { tools?: ToolSchema[]; jsonOnly?: boolean; model?: string } = {},
 ): Promise<Completion> {
   const body: Record<string, unknown> = {
-    model: config.llmModel,
+    model: options.model ?? config.llmModel,
     messages,
     // Ohne feste Temperatur streut jede der vier Modellstufen fuer sich, und
     // die Streuung summiert sich ueber den Lauf (Abschnitt 7.2.4).
@@ -85,6 +85,7 @@ export async function complete(
   }
 
   let lastError = "";
+  const startedAt = performance.now();
   for (let attempt = 0; attempt < 4; attempt += 1) {
     if (attempt > 0) await delay(1000 * 2 ** (attempt - 1));
 
@@ -130,9 +131,11 @@ export async function complete(
     recordModelCall(
       payload.usage?.prompt_tokens ?? 0,
       payload.usage?.completion_tokens ?? 0,
+      Math.round(performance.now() - startedAt),
+      attempt,
     );
     log.info("model_call", {
-      model: config.llmModel,
+      model: body.model,
       promptTokens: payload.usage?.prompt_tokens,
       completionTokens: payload.usage?.completion_tokens,
       toolCalls: message.tool_calls?.length ?? 0,

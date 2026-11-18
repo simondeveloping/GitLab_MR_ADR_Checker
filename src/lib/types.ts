@@ -25,11 +25,14 @@ export interface Rule {
   /** Dateiname des Herkunfts-ADR, etwa `001-datenbank.md`. */
   adrFile: string;
   origin: RuleOrigin;
+  /** Wörtliche, am Original-ADR geprüfte Grundlage der Regel. */
+  adrSource?: { startLine: number; endLine: number; quote: string };
 }
 
 /** Belegstelle, die der Locator meldet und der Reader liest. */
 export interface Evidence {
   path: string;
+  revision?: "base";
   startLine: number;
   endLine: number;
   why?: string;
@@ -63,11 +66,14 @@ export interface Finding {
   verdict: Verdict;
   /** Begründung des Readers, gehört zu jedem Urteil (FA-8). */
   rationale: string;
-  /** Zusätzliche Lernhinweise im automatisch aktivierten Lernmodus. */
+  /** Folge und Korrektur bestätigter ADR- oder Lernbefunde. */
   consequence?: string;
   suggestion?: string;
   /** Belegstelle; bei `C` und `NC` verpflichtend, bei `CIA` meist leer. */
   evidence: Evidence[];
+  /** Bestätigte Änderung; side=old bezeichnet eine gelöschte Zeile. */
+  anchor?: { path: string; line: number; side?: "old" };
+  coverage?: { status: "no_violation" | "incomplete"; searches: number; reads: number; rejectedCandidates: number };
   trace: ToolCallTrace[];
   /**
    * Das Werkzeugbudget dieser Regel war aufgebraucht (FA-7, Abschnitt 7.2.4).
@@ -87,6 +93,7 @@ export interface AdrTokenUsage extends TokenUsage {
   adrFile: string;
   adrTitle: string;
   extractedRules: number;
+  cacheHit?: boolean;
 }
 
 /** Regel, die der Vorfilter vor der Prüfung ausgeschlossen hat (FA-4). */
@@ -101,6 +108,26 @@ export interface AgentFailure {
   stage: "extract" | "triage" | "locator" | "reader" | "learning";
   ruleId?: string;
   message: string;
+}
+
+/** Kompakte Laufdaten des Lernmodus, ohne gespeicherte Modell-Zwischenberichte. */
+export interface LearningStats {
+  collectionMs: number;
+  integrationMs: number;
+  verificationMs: number;
+  deduplicationMs: number;
+  formattingMs: number;
+  chunks: number;
+  incompleteUnits: number;
+  candidates: number;
+  confirmed: number;
+  rejected: number;
+  inconclusive: number;
+  verificationErrors: number;
+  invalidCandidates: number;
+  integrationReason: "always" | "multiple_parts" | "incomplete" | "interfaces" | "broad_change" | "local_complete" | "no_changes";
+  /** Höchstens zehn Beispiele mit jeweils höchstens 400 Zeichen Begründung. */
+  openIssues: Array<{ path: string; line: number; side?: "old"; reason: string }>;
 }
 
 /** Nutzlast des Callbacks aus der Sandbox an das Backend. */
@@ -124,6 +151,11 @@ export interface SandboxResult {
     promptTokens?: number;
     completionTokens?: number;
     totalTokens?: number;
+    modelMs?: number;
+    retries?: number;
+    models?: { default: string; fast: string; verify: string };
+    architecture?: { searchMs: number; integrationMs: number; verificationMs: number; deduplicationMs: number; candidates: number; confirmed: number };
+    learning?: LearningStats;
     averageTokensPerCheckedRule?: number;
     averageTokensPerAdr?: number;
     phases?: {
@@ -178,6 +210,9 @@ export interface Review {
   createdAt: string;
   updatedAt: string;
   mr: MergeRequestContext;
+  /** Lernfreundliche ADR-Erklärung für den MR-Autor; fehlt bei älteren Reviews (= false).
+   * Beeinflusst nicht die Auswahl von architecture/learning anhand der Projekt-ADRs. */
+  learningExplanation?: boolean;
   /** Geheimnis, mit dem sich die Sandbox beim Callback ausweist. */
   callbackToken: string;
   /** Kurzlebiger Hinweiskommentar am MR (Abschnitt 7.2.1). */

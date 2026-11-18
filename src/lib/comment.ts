@@ -89,6 +89,10 @@ export function renderComment(findings: Finding[]): string {
     lines.push("");
     lines.push(`> ${finding.rule.text}`);
     lines.push("");
+    if (finding.rule.adrSource) {
+      const { startLine, endLine, quote } = finding.rule.adrSource;
+      lines.push(`**ADR-Grundlage:** \`${finding.rule.adrFile}:${startLine}-${endLine}\` — „${quote}“`, "");
+    }
     lines.push(finding.rationale.trim());
     lines.push("");
 
@@ -100,6 +104,7 @@ export function renderComment(findings: Finding[]): string {
       for (const evidence of finding.evidence) {
         lines.push(
           `- \`${evidence.path}:${evidence.startLine}-${evidence.endLine}\`` +
+            (evidence.revision === "base" ? " (vor der Änderung)" : "") +
             (evidence.why ? ` — ${evidence.why}` : ""),
         );
       }

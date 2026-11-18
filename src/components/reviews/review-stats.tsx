@@ -2,6 +2,7 @@ import { findingsOf, verdictCounts } from "@/lib/findings";
 import { formatDuration } from "@/lib/format";
 import { REVIEW_STATUS_LABEL } from "@/lib/reviews";
 import type { Review, RuleBaseOrigin, SandboxResult } from "@/lib/types";
+import { LearningStats } from "./learning-stats";
 
 const RULE_BASE_LABEL: Record<RuleBaseOrigin, string> = {
   learning: "Lernmodus",
@@ -52,6 +53,20 @@ export function ReviewStats({ review }: { review: Review }) {
                 <dd>{typeof duration === "number" ? formatDuration(duration) : "—"}</dd>
               </div>
             ))}
+          </dl>
+        </section>
+      ) : null}
+      {learning && result?.stats.learning ? <LearningStats stats={result.stats.learning} /> : null}
+      {result?.stats.architecture ? (
+        <section className="review-timings" aria-label="Details der ADR-Prüfung">
+          <h2>ADR-Prüfung im Detail</h2>
+          <dl>
+            <div><dt>ADRs aus Regel-Cache</dt><dd>{result.adrTokenUsage?.filter((entry) => entry.cacheHit).length ?? 0} / {result.adrFiles.length}</dd></div>
+            <div><dt>Gemeinsame Suche</dt><dd>{formatDuration(result.stats.architecture.searchMs)}</dd></div>
+            <div><dt>Integrationssuche</dt><dd>{formatDuration(result.stats.architecture.integrationMs)}</dd></div>
+            <div><dt>Verifikation</dt><dd>{formatDuration(result.stats.architecture.verificationMs)}</dd></div>
+            <div><dt>Dublettenprüfung</dt><dd>{formatDuration(result.stats.architecture.deduplicationMs)}</dd></div>
+            <div><dt>Bestätigte Verdachtsfälle</dt><dd>{result.stats.architecture.confirmed} / {result.stats.architecture.candidates}</dd></div>
           </dl>
         </section>
       ) : null}

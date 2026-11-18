@@ -61,7 +61,9 @@ test("Lernphasen zeigen Teilfortschritt, überspringen leere Phasen und verwerfe
 test("Architektur-Suche und Verifikation haben getrennte Fortschrittsphasen", () => {
   const tracker = new SandboxProgressTracker(new Date().toISOString());
   tracker.consume("phase_progress", { phase: "architecture_search", completed: 1, total: 2 });
-  assert.equal(tracker.snapshot.percent, 54);
+  assert.equal(tracker.snapshot.percent, 50);
+  tracker.consume("phase_progress", { phase: "architecture_integration", completed: 1, total: 1 });
+  assert.equal(tracker.snapshot.percent, 68);
   tracker.consume("phase_progress", { phase: "architecture_verify", completed: 1, total: 2 });
   assert.equal(tracker.snapshot.percent, 80);
   tracker.consume("phase_progress", { phase: "architecture_verify", completed: 2, total: 2 });

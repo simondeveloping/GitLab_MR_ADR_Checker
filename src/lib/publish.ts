@@ -23,30 +23,30 @@ interface DiffTarget {
   oldPath: string;
   /** Tatsächlich hinzugefügte Zeilen im Zielstand. */
   newLines: Set<number>;
+  oldLines?: Set<number>;
 }
 
-const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
+const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
 /**
  * Liest nur hinzugefügte Zeilen aus den Diff-Hunks heraus.
  */
-function collectNewLines(diffText: string): Set<number> {
+function collectChangedLines(diffText: string, side: "new" | "old"): Set<number> {
   const lines = new Set<number>();
   let cursor = 0;
 
   for (const line of diffText.split("\n")) {
     const header = HUNK_HEADER.exec(line);
     if (header) {
-      cursor = Number(header[1]);
+      cursor = Number(header[side === "old" ? 1 : 2]);
       continue;
     }
     if (cursor === 0) continue;
 
     if (line.startsWith("+")) {
-      lines.add(cursor);
-      cursor += 1;
+      if (side === "new") { lines.add(cursor); cursor += 1; }
     } else if (line.startsWith("-")) {
-      // Zeile existiert im Zielstand nicht.
+      if (side === "old") { lines.add(cursor); cursor += 1; }
     } else if (line.startsWith("\\")) {
       // "\ No newline at end of file"
     } else cursor += 1;
@@ -65,12 +65,15 @@ async function loadDiffTargets(
   const targets = new Map<string, DiffTarget>();
   for (const diff of diffs) {
     const newPath = String(diff.new_path ?? diff.old_path ?? "");
-    if (!newPath || diff.deleted_file) continue;
-    targets.set(newPath, {
+    if (!newPath) continue;
+    const target = {
       newPath,
       oldPath: String(diff.old_path ?? newPath),
-      newLines: collectNewLines(String(diff.diff ?? "")),
-    });
+      newLines: collectChangedLines(String(diff.diff ?? ""), "new"),
+      oldLines: collectChangedLines(String(diff.diff ?? ""), "old"),
+    };
+    targets.set(newPath, target);
+    if (target.oldPath !== newPath) targets.set(target.oldPath, target);
   }
   return targets;
 }
@@ -79,15 +82,23 @@ async function loadDiffTargets(
  * Sucht die erste Belegstelle eines Befunds auf einer tatsächlich
  * hinzugefügten Zeile. Kontextzeilen sind keine MR-Änderungen.
  */
-function findCommentablePosition(
+export function findCommentablePosition(
   finding: Finding,
   targets: Map<string, DiffTarget>,
-): { target: DiffTarget; line: number } | null {
+): { target: DiffTarget; line: number; side?: "old" } | null {
+  if (finding.anchor) {
+    const target = targets.get(finding.anchor.path);
+    const side = finding.anchor.side;
+    return target && (side === "old" ? target.oldLines : target.newLines)?.has(finding.anchor.line)
+      ? { target, line: finding.anchor.line, ...(side ? { side } : {}) } : null;
+  }
   for (const evidence of finding.evidence) {
     const target = targets.get(evidence.path);
     if (!target) continue;
     for (let line = evidence.startLine; line <= evidence.endLine; line += 1) {
-      if (target.newLines.has(line)) return { target, line };
+      if (evidence.revision === "base" ? target.oldLines?.has(line) : target.newLines.has(line)) {
+        return { target, line, ...(evidence.revision ? { side: "old" as const } : {}) };
+      }
     }
   }
   return null;
@@ -151,7 +162,7 @@ export async function publishFindings(review: Review): Promise<PublishResult> {
           {
             newPath: position.target.newPath,
             oldPath: position.target.oldPath,
-            newLine: position.line,
+            ...(position.side === "old" ? { oldLine: position.line } : { newLine: position.line }),
           },
           review.mr.repoUrl,
         );

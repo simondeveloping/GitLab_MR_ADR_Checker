@@ -7,8 +7,10 @@ type Progress = NonNullable<Review["sandboxProgress"]>;
 const PHASES: Record<string, { start: number; end: number; label: string }> = {
   extraction: { start: 25, end: 35, label: "ADR-Dokumente" },
   judging: { start: 40, end: 92, label: "Regeln" },
-  architecture_search: { start: 40, end: 68, label: "Änderungseinheiten" },
+  architecture_search: { start: 40, end: 61, label: "Änderungseinheiten" },
+  architecture_integration: { start: 61, end: 68, label: "Schnittstellen" },
   architecture_verify: { start: 68, end: 92, label: "Verstoßkandidaten" },
+  architecture_deduplicate: { start: 92, end: 95, label: "Ursachenvergleiche" },
   learning_collect: { start: 30, end: 55, label: "Diffteile" },
   learning_integration: { start: 55, end: 65, label: "Integrationspakete" },
   learning_verify: { start: 65, end: 82, label: "Kandidaten" },
@@ -114,7 +116,7 @@ export class SandboxProgressTracker {
         stage("learning_deduplicate", 82, "Bestätigte Befunde werden auf doppelte Ursachen geprüft …");
         break;
       case "learning_description_start":
-        stage("learning_describe", 90, "Verifizierte Kommentare werden formuliert …");
+        stage("learning_describe", 90, "Verifizierte Kommentare werden zusammengestellt …");
         break;
       case "run_summary":
         this.set("finishing", 95, "Prüfung abgeschlossen; Ergebnisse werden gespeichert …");

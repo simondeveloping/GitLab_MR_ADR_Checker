@@ -17,10 +17,13 @@ export interface Rule {
   adrTitle: string;
   adrFile: string;
   origin: RuleOrigin;
+  /** Wörtliche, am Original-ADR geprüfte Grundlage der Regel. */
+  adrSource?: { startLine: number; endLine: number; quote: string };
 }
 
 export interface Evidence {
   path: string;
+  revision?: "base";
   startLine: number;
   endLine: number;
   why?: string;
@@ -54,6 +57,9 @@ export interface Finding {
   consequence?: string;
   suggestion?: string;
   evidence: Evidence[];
+  /** Bestätigte Änderung; side=old bezeichnet eine gelöschte Zeile. */
+  anchor?: { path: string; line: number; side?: "old" };
+  coverage?: { status: "no_violation" | "incomplete"; searches: number; reads: number; rejectedCandidates: number };
   trace: ToolCallTrace[];
   /** Nur protokolliert, nicht mehr als Unsicherheitssignal ausgewiesen. */
   budgetExhausted: boolean;
@@ -65,6 +71,7 @@ export interface AdrTokenUsage extends TokenUsage {
   adrFile: string;
   adrTitle: string;
   extractedRules: number;
+  cacheHit?: boolean;
 }
 
 export interface DroppedRule {
@@ -76,6 +83,26 @@ export interface AgentFailure {
   stage: "extract" | "triage" | "locator" | "reader" | "learning";
   ruleId?: string;
   message: string;
+}
+
+/** Kompakte Laufdaten des Lernmodus, ohne gespeicherte Modell-Zwischenberichte. */
+export interface LearningStats {
+  collectionMs: number;
+  integrationMs: number;
+  verificationMs: number;
+  deduplicationMs: number;
+  formattingMs: number;
+  chunks: number;
+  incompleteUnits: number;
+  candidates: number;
+  confirmed: number;
+  rejected: number;
+  inconclusive: number;
+  verificationErrors: number;
+  invalidCandidates: number;
+  integrationReason: "always" | "multiple_parts" | "incomplete" | "interfaces" | "broad_change" | "local_complete" | "no_changes";
+  /** Höchstens zehn Beispiele mit jeweils höchstens 400 Zeichen Begründung. */
+  openIssues: Array<{ path: string; line: number; side?: "old"; reason: string }>;
 }
 
 export interface SandboxResult {
@@ -98,6 +125,11 @@ export interface SandboxResult {
     promptTokens?: number;
     completionTokens?: number;
     totalTokens?: number;
+    modelMs?: number;
+    retries?: number;
+    models?: { default: string; fast: string; verify: string };
+    architecture?: { searchMs: number; integrationMs: number; verificationMs: number; deduplicationMs: number; candidates: number; confirmed: number };
+    learning?: LearningStats;
     averageTokensPerCheckedRule?: number;
     averageTokensPerAdr?: number;
     phases?: {

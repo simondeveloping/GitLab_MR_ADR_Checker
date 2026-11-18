@@ -1,4 +1,5 @@
 import { counters } from "./trace.js";
+import { config } from "./config.js";
 import type { SandboxResult } from "./types.js";
 
 export function buildStats(
@@ -17,6 +18,9 @@ export function buildStats(
     promptTokens: counters.promptTokens,
     completionTokens: counters.completionTokens,
     totalTokens: counters.totalTokens,
+    modelMs: counters.modelMs,
+    retries: counters.retries,
+    models: { default: config.llmModel, fast: config.fastModel, verify: config.verifyModel },
     phases,
     averageTokensPerCheckedRule: checkedRules > 0 ? counters.totalTokens / checkedRules : 0,
     ...(adrCount === undefined ? {} : {

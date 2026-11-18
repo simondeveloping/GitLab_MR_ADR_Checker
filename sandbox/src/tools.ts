@@ -23,12 +23,28 @@
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { join, relative, resolve, sep } from "node:path";
 import { config } from "./config.js";
 import type { ToolCallTrace } from "./types.js";
 import { counters, log } from "./trace.js";
 
 const ROOT = resolve(config.repoDir);
+const run = promisify(execFile);
+let baseSha = "";
+export function setBaseSha(sha: string): void {
+  if (!/^[a-f0-9]{40,64}$/.test(sha)) throw new Error("Ungültige Diff-Basis.");
+  baseSha = sha;
+}
+
+async function baseSource(path: string): Promise<string> {
+  if (!baseSha) throw new Error("Diff-Basis ist nicht verfügbar.");
+  const { stdout } = await run("git", ["show", `${baseSha}:${path}`], {
+    cwd: ROOT, maxBuffer: 2 * 1024 * 1024, timeout: 5000,
+  });
+  return stdout;
+}
 
 /** Verzeichnisse, die nie durchsucht werden. */
 const SKIP_DIRS = new Set([
@@ -80,16 +96,18 @@ export async function loadEvidenceSnippet(
   path: string,
   startLine: number,
   endLine: number,
+  revision?: "base",
 ): Promise<{ startLine: number; lines: string[] } | undefined> {
   try {
     const absolute = await safeResolve(path);
     const rel = toRelative(absolute);
     if (isExcluded(rel)) return undefined;
 
-    const info = await stat(absolute);
-    if (!info.isFile() || info.size > MAX_FILE_BYTES) return undefined;
-
-    const sourceLines = (await readFile(absolute, "utf8")).split("\n");
+    if (!revision) {
+      const info = await stat(absolute);
+      if (!info.isFile() || info.size > MAX_FILE_BYTES) return undefined;
+    }
+    const sourceLines = (revision ? await baseSource(rel) : await readFile(absolute, "utf8")).split("\n");
     const first = Math.max(1, Math.floor(startLine) - 2);
     const last = Math.min(
       sourceLines.length,
@@ -326,7 +344,7 @@ export async function grep(
 /** Liest einen Zeilenbereich einer Datei, mit Zeilennummern. */
 export async function readFileTool(
   ctx: ToolContext,
-  args: { path: string; start_line?: number; end_line?: number },
+  args: { path: string; start_line?: number; end_line?: number; revision?: "base" },
 ): Promise<string> {
   const startedAt = Date.now();
 
@@ -339,6 +357,15 @@ export async function readFileTool(
       // FA-5: Die zu prüfende Regel darf sich nicht als eigener Beleg
       // wiederfinden.
       return `Datei liegt ausserhalb des Suchraums: ${args.path}`;
+    }
+    if (args.revision !== undefined) {
+      if (args.revision !== "base") throw new Error("Unbekannter Codestand.");
+      const lines = (await baseSource(rel)).split("\n");
+      const start = Math.max(1, Math.floor(args.start_line ?? 1));
+      const end = Math.min(lines.length, Math.max(start, Math.floor(args.end_line ?? start + MAX_READ_LINES - 1)), start + MAX_READ_LINES - 1);
+      const window = lines.slice(start - 1, end);
+      record(ctx, "read_file", args, window.length, startedAt);
+      return `${rel} (Basisstand, Zeilen ${start}-${end} von ${lines.length}):\n${window.map((line, index) => `${start + index}\t${line}`).join("\n")}`;
     }
 
     const info = await stat(absolute).catch(() => null);
@@ -436,6 +463,7 @@ export const READER_TOOLS = [
         path: { type: "string", description: "Pfad relativ zur Repository-Wurzel." },
         start_line: { type: "integer", description: "Erste Zeile (1-basiert)." },
         end_line: { type: "integer", description: "Letzte Zeile (einschliesslich)." },
+        revision: { type: "string", enum: ["base"], description: "Optional: base liest den alten Stand vor dem MR, auch bei gelöschten Dateien. Ohne Angabe aktueller Stand." },
       },
       required: ["path"],
     },
