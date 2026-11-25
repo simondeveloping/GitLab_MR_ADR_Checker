@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { Activity, CheckCircle2, GitMerge, Hash } from "lucide-react";
 import { DashboardCharts, type DashboardDay } from "@/components/monitor/dashboard-charts";
-import { listReviews } from "@/lib/store";
-import { isActiveReview, reviewHasFailures } from "@/lib/reviews";
-import { reviewTokenBreakdown, reviewTokenCount } from "@/lib/review-tokens";
+import { listReviews } from "@/lib/reviews/store";
+import { isActiveReview, reviewHasFailures } from "@/lib/reviews/summary";
+import { reviewTokenBreakdown, reviewTokenCount } from "@/lib/reviews/tokens";
 import { compactFormat, integerFormat } from "@/lib/format";
 
 export const dynamic = "force-dynamic";

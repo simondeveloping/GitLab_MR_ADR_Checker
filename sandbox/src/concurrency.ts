@@ -1,13 +1,13 @@
 /**
  * Begrenzte Parallelität für unabhängige Modellaufgaben.
  *
- * Sowohl die Regelextraktion (eine Aufgabe je ADR) als auch die Prüfung (eine
- * Aufgabe je Regel) bestehen aus voneinander unabhängigen Einheiten, die den
- * grössten Teil ihrer Laufzeit auf das Modellgateway warten. Sie nacheinander
- * abzuarbeiten verlängert die Wandzeit ohne Gegenwert; sie alle zugleich zu
+ * Je Phase laufen unabhängige ADR-Extraktionen, Diff-/Regelpakete oder
+ * Kandidatenprüfungen. Sie warten den größten Teil ihrer Laufzeit auf das
+ * Modellgateway. Sie nacheinander abzuarbeiten verlängert die Wandzeit ohne
+ * Gegenwert; sie alle zugleich zu
  * starten überflutet das Gateway und provoziert 429-Antworten. Die Obergrenze
  * kommt deshalb aus der Konfiguration (`EXTRACTION_CONCURRENCY`,
- * `JUDGING_CONCURRENCY`).
+ * `JUDGING_CONCURRENCY`, `LEARNING_CONCURRENCY`).
  */
 
 /**

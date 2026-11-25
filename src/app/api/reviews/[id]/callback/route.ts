@@ -9,9 +9,9 @@
 
 import { NextResponse } from "next/server";
 import { bearerToken, secretMatches } from "@/lib/auth";
-import { removePlaceholder } from "@/lib/orchestrator";
-import { publishFindings } from "@/lib/publish";
-import { getReview, updateReview } from "@/lib/store";
+import { removePlaceholder } from "@/lib/reviews/orchestrator";
+import { publishFindings } from "@/lib/gitlab/publish";
+import { getReview, updateReview } from "@/lib/reviews/store";
 import type { SandboxResult } from "@/lib/types";
 
 export const runtime = "nodejs";

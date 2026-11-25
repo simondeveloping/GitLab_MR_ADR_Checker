@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { isActiveReview, type ProgressSnapshot } from "@/lib/reviews";
+import { isActiveReview, type ProgressSnapshot } from "@/lib/reviews/summary";
 
 export default function ReviewProgress({
   reviewId,

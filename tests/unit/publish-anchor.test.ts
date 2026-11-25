@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { findCommentablePosition } from "../../src/lib/publish";
-import { createInlineDiscussion } from "../../src/lib/gitlab";
+import { findCommentablePosition } from "../../src/lib/gitlab/publish";
+import { createInlineDiscussion } from "../../src/lib/gitlab/client";
 import { makeReview } from "../fixtures";
 
 test("bestätigter Anker hat Vorrang vor anderen hinzugefügten Belegzeilen", () => {

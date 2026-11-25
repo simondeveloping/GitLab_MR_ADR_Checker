@@ -1,7 +1,7 @@
 import { GitMerge } from "lucide-react";
-import { ReviewsBrowser } from "@/components/reviews-browser";
-import { listReviews } from "@/lib/store";
-import { summarizeReview } from "@/lib/reviews";
+import { ReviewsBrowser } from "@/components/reviews/reviews-browser";
+import { listReviews } from "@/lib/reviews/store";
+import { summarizeReview } from "@/lib/reviews/summary";
 
 export const dynamic = "force-dynamic";
 

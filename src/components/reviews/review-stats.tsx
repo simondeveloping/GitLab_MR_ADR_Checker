@@ -1,6 +1,6 @@
-import { findingsOf, verdictCounts } from "@/lib/findings";
+import { findingsOf, verdictCounts } from "@/lib/reviews/findings";
 import { formatDuration } from "@/lib/format";
-import { REVIEW_STATUS_LABEL } from "@/lib/reviews";
+import { REVIEW_STATUS_LABEL } from "@/lib/reviews/summary";
 import type { Review, RuleBaseOrigin, SandboxResult } from "@/lib/types";
 import { LearningStats } from "./learning-stats";
 

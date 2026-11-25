@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Frown, MessageSquareHeart, Meh, Smile } from "lucide-react";
 import { FeedbackChart } from "@/components/feedback/feedback-chart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { listReviews } from "@/lib/store";
+import { listReviews } from "@/lib/reviews/store";
 
 export const dynamic = "force-dynamic";
 

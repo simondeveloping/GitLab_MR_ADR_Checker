@@ -1,7 +1,7 @@
 /**
  * Modellzugang (Abschnitt 7.1, NFA-1).
  *
- * Die Agentenschleife ist direkt gegen die Chat-Completions-Schnittstelle des
+ * Die Agentenschleife ist direkt gegen die Chat-Schnittstelle des
  * Gateways implementiert, ohne Framework. Das hält Werkzeugauswahl,
  * Schrittgrenze und Protokollierung vollständig kontrollierbar - genau die
  * drei Punkte, an denen die verfügbaren Dienste ausscheiden. Gebunden ist der
@@ -47,7 +47,7 @@ export interface Completion {
 const RETRYABLE = new Set([408, 429, 500, 502, 503, 504]);
 
 /**
- * Ein Aufruf der Chat-Completions-Schnittstelle.
+ * Ein Aufruf des Chat-Endpunkts des Gateways.
  *
  * Transportfehler werden begrenzt wiederholt; ein inhaltlich unbrauchbares
  * Ergebnis wird nicht wiederholt, sondern nach oben gereicht, damit es als
@@ -91,7 +91,7 @@ export async function complete(
 
     let response: Response;
     try {
-      response = await fetch(`${config.llmBaseUrl}/chat/completions`, {
+      response = await fetch(`${config.llmBaseUrl}${config.llmChatPath}`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${config.llmApiKey}`,
@@ -195,4 +195,17 @@ export function parseJsonObject<T>(content: string | null): T | null {
   }
 
   return null;
+}
+
+/** Normalisiert begrenzte Textfelder aus untypisierten Modellantworten. */
+export function modelText(value: unknown, max = 1200): string {
+  return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+export function modelObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+export function modelStrings(value: unknown, limit: number, length: number): string[] {
+  return Array.isArray(value) ? value.map((item) => modelText(item, length)).filter(Boolean).slice(0, limit) : [];
 }

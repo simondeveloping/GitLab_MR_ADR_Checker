@@ -186,6 +186,9 @@ export const env = {
   get llmBaseUrl() {
     return required("LLM_BASE_URL").replace(/\/+$/, "");
   },
+  get llmChatPath() {
+    return process.env.LLM_CHAT_PATH?.trim() || "/chat/response";
+  },
   get llmApiKey() {
     return required("LLM_API_KEY");
   },
@@ -242,14 +245,14 @@ export const env = {
     ).replace(/\/+$/, "");
   },
   /**
-   * Werkzeugbudget je Regel. Die Vorgabewerte sind der Knick der
-   * Sättigungskurve aus Abschnitt 6.6.4: acht Suchrunden, fünf
-   * Datei-Öffnungen, zwei Nachsuchen.
+   * Grundbudget je Architektur-Sitzung, an die Sandbox weitergereicht.
+   * Gemeinsame Suchläufe passen das Lesebudget dort an die Paketgröße an.
    */
   get budget() {
     return {
       searchRounds: optionalNumber("BUDGET_SEARCH_ROUNDS", 8),
       fileReads: optionalNumber("BUDGET_FILE_READS", 5),
+      // Weitergereichter Altparameter für ältere Sandbox-Images.
       refetches: optionalNumber("BUDGET_REFETCHES", 2),
     };
   },

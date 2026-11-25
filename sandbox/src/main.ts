@@ -10,17 +10,16 @@
  *
  * ADR-Dateien dienen ausschließlich als Regelbasis. Sie werden aus dem
  * Änderungssatz entfernt und nie als Prüfgegenstand oder Patch-Kontext genutzt.
- *   5 Prüfung        Architekturregeln: Locator/Reader; Lernmodus: Diff-Review
- *   6 Befunde         je Regel ein Urteil mit Begründung und Belegstelle
+ *   5 Prüfung        Diffteile durchsuchen, Schnittstellen prüfen, Kandidaten verifizieren
+ *   6 Befunde         bestätigte Ursachen deduplizieren und Ergebnisse bündeln
  *
  * Danach schickt das Skript die Antworten gebündelt per HTTP-Callback an das
  * Backend. Der Container wird anschließend beendet und gelöscht, sodass der
  * geklonte Quellcode ab diesem Zeitpunkt nirgends mehr existiert
  * (Abschnitt 7.2.5).
  *
- * Die Prüfvorgänge laufen mit begrenzter Parallelität. Die einzelnen Regeln
- * bleiben isoliert und budgetiert, aber unabhängige LLM-Wartezeiten blockieren
- * einander nicht.
+ * Die Prüfvorgänge laufen mit begrenzter Parallelität. Jede Such- und
+ * Verifikationsaufgabe erhält einen isolierten, budgetierten Modellkontext.
  */
 
 import { config } from "./config.js";

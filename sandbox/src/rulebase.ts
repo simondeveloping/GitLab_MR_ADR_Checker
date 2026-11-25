@@ -56,7 +56,16 @@ function extractStatus(content: string): string | null {
 
   const frontMatter = /^---\s*\n([\s\S]*?)\n---/.exec(content);
   const status = frontMatter?.[1].match(/^status\s*:\s*(.+)$/im)?.[1];
-  return status?.trim() ?? null;
+  if (status) return status.trim();
+
+  // Kurzformat vieler ADRs: "- **Status:** Akzeptiert" direkt unter dem Titel.
+  // Nur im Kopf vor dem ersten Abschnitt suchen, nicht in Kontext/Alternativen.
+  for (const line of lines) {
+    if (/^#{2,6}\s+/.test(line.trim())) break;
+    const inline = /^\s*(?:[-*]\s+)?(?:\*\*|__)?status\s*:\s*(?:\*\*|__)?\s*(.+)$/i.exec(line);
+    if (inline) return inline[1].trim();
+  }
+  return null;
 }
 
 function isAcceptedStatus(status: string | null): boolean {

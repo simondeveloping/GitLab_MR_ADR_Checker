@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { bearerToken, secretMatches } from "@/lib/auth";
-import { accessRuleCache, RULE_CACHE_ENTRY_BYTES, validCachedRules } from "@/lib/rule-cache";
-import { getReview } from "@/lib/store";
+import { accessRuleCache, RULE_CACHE_ENTRY_BYTES, validCachedRules } from "@/lib/reviews/rule-cache";
+import { getReview } from "@/lib/reviews/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

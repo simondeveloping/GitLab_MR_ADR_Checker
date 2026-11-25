@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { env } from "../../src/lib/env";
-import { automatedReviewReason } from "../../src/lib/review-trigger";
+import { automatedReviewReason } from "../../src/lib/reviews/trigger";
 
 test("Automationsfilter erkennt Bot-Autoren und reservierte Branch-Präfixe ohne Teilworttreffer", () => {
   const filter = env.reviewTriggerFilter;

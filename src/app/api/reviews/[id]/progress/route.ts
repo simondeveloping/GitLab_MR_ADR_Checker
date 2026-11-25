@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { getReview } from "@/lib/store";
-import type { ProgressSnapshot } from "@/lib/reviews";
-import { reviewProgressStream } from "@/lib/review-progress-stream";
+import { getReview } from "@/lib/reviews/store";
+import type { ProgressSnapshot } from "@/lib/reviews/summary";
+import { reviewProgressStream } from "@/lib/reviews/progress-stream";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

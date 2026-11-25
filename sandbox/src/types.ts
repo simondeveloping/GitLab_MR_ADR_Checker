@@ -1,9 +1,9 @@
 /**
- * Deckungsgleiche Kopie von `src/lib/types.ts` des Backends.
+ * Callback-Typen, deckungsgleich mit dem entsprechenden Teil von `src/lib/types.ts`.
  *
  * Die Sandbox wird als eigenes Container-Image gebaut und darf deshalb nicht
  * auf das Next.js-Projekt zugreifen. Ändert sich das Callback-Format, sind
- * beide Dateien anzupassen.
+ * beide Dateien anzupassen; `tests/contracts.ts` prüft ihre Übereinstimmung.
  */
 
 export type Verdict = "C" | "NC" | "CIA";
@@ -53,7 +53,7 @@ export interface Finding {
   rule: Rule;
   verdict: Verdict;
   rationale: string;
-  /** Zusätzliche Lernhinweise im automatisch aktivierten Lernmodus. */
+  /** Folge und Korrektur bestätigter ADR- oder Lernbefunde. */
   consequence?: string;
   suggestion?: string;
   evidence: Evidence[];

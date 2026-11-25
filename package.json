@@ -9,7 +9,9 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/unit/*.test.ts",
+    "test": "tsx --test tests/unit/*.test.ts tests/integration/*.test.ts",
+    "test:unit": "tsx --test tests/unit/*.test.ts",
+    "test:integration": "tsx --test tests/integration/*.test.ts",
     "test:e2e": "playwright test",
     "sandbox:build": "podman build -t adr-review-agent:latest -f sandbox/Containerfile sandbox"
   },

@@ -31,6 +31,7 @@ export const config = {
   callbackToken: required("CALLBACK_TOKEN"),
 
   llmBaseUrl: required("LLM_BASE_URL").replace(/\/+$/, ""),
+  llmChatPath: process.env.LLM_CHAT_PATH?.trim() || "/chat/response",
   llmApiKey: required("LLM_API_KEY"),
   llmModel: process.env.LLM_MODEL ?? "gpt-5.4-mini",
   fastModel: process.env.LLM_FAST_MODEL || process.env.LLM_MODEL || "gpt-5.4-mini",
@@ -69,18 +70,16 @@ export const config = {
       : undefined,
 
   /**
-   * Werkzeugbudget je Regel (FA-7, Abschnitt 7.2.4).
+   * Werkzeugbudget je Repository-Sitzung im Architekturmodus (FA-7, Abschnitt 7.2.4).
    *
-   * Die Vorgabewerte sind der Knick der Sättigungskurve aus Abschnitt 6.6.4:
-   * acht Suchrunden, fünf Datei-Öffnungen, zwei Nachsuchen. Beide Richtungen
-   * sind teuer - ein zu kleines Budget lässt den Vorteil des Werkzeugzugriffs
-   * fast vollständig zusammenschrumpfen, ein zu großes kostet Laufzeit ohne
-   * Gegenwert und verleitet das Modell dazu, schwache Indizien
-   * überzuinterpretieren.
+   * Die Grundwerte von acht Suchrunden und fünf Dateiöffnungen stammen aus
+   * Abschnitt 6.6.4. Gemeinsame Suchläufe erhöhen das Lesebudget abhängig von
+   * der Paketgröße; die Einzelverifikation nutzt die Grundwerte.
    */
   budget: {
     searchRounds: number("BUDGET_SEARCH_ROUNDS", 8),
     fileReads: number("BUDGET_FILE_READS", 5),
+    // Altparameter für kompatible Konfigurationen; die aktuelle Pipeline nutzt ihn nicht.
     refetches: number("BUDGET_REFETCHES", 2),
   },
 
@@ -94,8 +93,8 @@ export const config = {
   },
 
   /**
-   * Mehrere ADRs und Regeln sind unabhängige Prüfeinheiten. Begrenzte
-   * Parallelität verkürzt die Wandzeit, ohne das Modellgateway unkontrolliert
+   * ADR-Extraktionen, Diff-/Regelpakete und Kandidaten sind je Phase unabhängig.
+   * Begrenzte Parallelität verkürzt die Wandzeit, ohne das Modellgateway unkontrolliert
    * zu überlasten.
    */
   concurrency: {

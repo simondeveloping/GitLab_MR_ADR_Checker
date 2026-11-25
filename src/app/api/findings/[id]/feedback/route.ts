@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isRating, recordFeedback } from "@/lib/feedback";
+import { isRating, recordFeedback } from "@/lib/reviews/feedback";
 
 export const runtime = "nodejs";
 

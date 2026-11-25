@@ -1,7 +1,7 @@
 import { FindingFeedback } from "@/components/feedback/finding-feedback";
-import { ruleSource } from "@/lib/comment";
-import { VERDICT_LABEL } from "@/lib/findings";
-import type { ReviewDiffHunk } from "@/lib/review-diff";
+import { ruleSource } from "@/lib/gitlab/comment";
+import { VERDICT_LABEL } from "@/lib/reviews/findings";
+import type { ReviewDiffHunk } from "@/lib/reviews/diff";
 import type { FeedbackEntry, Finding } from "@/lib/types";
 
 function DiffHunk({ hunk }: { hunk: ReviewDiffHunk }) {

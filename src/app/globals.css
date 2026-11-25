@@ -228,7 +228,6 @@ h1 { margin: 0; color: #272c39; font-size: 28px; font-weight: 700; letter-spacin
 .ui-badge-warning { color: #95600e; border-color: transparent; background: #a16b1212; }
 .ui-badge-destructive { color: #b13542; border-color: transparent; background: #c53e4b12; }
 .ui-badge-outline { color: #606978; border-color: var(--border); background: white; }
-.ui-separator { height: 1px; width: 100%; border: 0; background: var(--border); }
 .review-table-wrap { width: 100%; }
 .ui-table-container { width: 100%; overflow-x: auto; }
 .ui-table { width: 100%; caption-side: bottom; border-collapse: collapse; font-size: 14px; }
@@ -256,7 +255,9 @@ h1 { margin: 0; color: #272c39; font-size: 28px; font-weight: 700; letter-spacin
 .review-table th:last-child, .review-table td:last-child { padding-right: 20px; }
 .mr-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .mr-main { display: grid; min-width: 0; gap: 2px; }
-.mode-cell { color: var(--muted); white-space: nowrap; }
+.mode-cell { color: var(--muted); }
+.mode-label { display: grid; gap: 2px; line-height: 1.25; }
+.mode-enhancement { color: var(--accent); font-size: 11px; font-weight: 600; }
 .mr-title { overflow: hidden; color: var(--fg); font-size: 14px; font-weight: 700; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .mr-title:hover { text-decoration: underline; text-underline-offset: 3px; }
 .mr-project { overflow: hidden; color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }

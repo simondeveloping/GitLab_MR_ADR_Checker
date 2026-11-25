@@ -2,9 +2,9 @@ import Link from "next/link";
 import { ArrowUpRight, ChevronDown, CircleAlert, FileWarning, GitMerge } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { listReviews } from "@/lib/store";
+import { listReviews } from "@/lib/reviews/store";
 import { formatDate } from "@/lib/format";
-import { reviewHasFailures } from "@/lib/reviews";
+import { reviewHasFailures } from "@/lib/reviews/summary";
 import type { AgentFailure } from "@/lib/types";
 
 export const dynamic = "force-dynamic";

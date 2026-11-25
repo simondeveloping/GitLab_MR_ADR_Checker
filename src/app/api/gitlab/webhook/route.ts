@@ -16,10 +16,10 @@
 import { NextResponse } from "next/server";
 import { secretMatches } from "@/lib/auth";
 import { env } from "@/lib/env";
-import { createReview, startReview } from "@/lib/orchestrator";
+import { createReview, startReview } from "@/lib/reviews/orchestrator";
 import { writeOperationalLog } from "@/lib/operational-log";
-import { loadReviewAuthor } from "@/lib/gitlab";
-import { automatedReviewReason, type ReviewAuthor } from "@/lib/review-trigger";
+import { loadReviewAuthor } from "@/lib/gitlab/client";
+import { automatedReviewReason, type ReviewAuthor } from "@/lib/reviews/trigger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

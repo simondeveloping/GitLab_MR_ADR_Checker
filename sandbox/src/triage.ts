@@ -3,7 +3,7 @@ import { complete, parseJsonObject } from "./llm.js";
 import { config } from "./config.js";
 import { mapWithConcurrency } from "./concurrency.js";
 import { log } from "./trace.js";
-import type { LearningChunk } from "./learning-diff.js";
+import type { ReviewChunk } from "./review-diff.js";
 import type { AgentFailure, DroppedRule, Rule } from "./types.js";
 import { ruleInput, batchRules } from "./rule-context.js";
 
@@ -22,7 +22,7 @@ export interface TriageResult {
   byChunk: Map<string, Rule[]>;
 }
 
-export async function triage(rules: Rule[], chunks: LearningChunk[]): Promise<TriageResult> {
+export async function triage(rules: Rule[], chunks: ReviewChunk[]): Promise<TriageResult> {
   const byChunk = new Map<string, Rule[]>();
   const failures: AgentFailure[] = [];
   if (!chunks.length || !rules.length) return {

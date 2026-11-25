@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SandboxProgressTracker } from "../../src/lib/sandbox-progress";
+import { SandboxProgressTracker } from "../../src/lib/sandbox/progress";
 
 test("parallel gestartete Regeln zählen erst beim Abschluss, auch mit älterem Sandbox-Image", () => {
   const tracker = new SandboxProgressTracker(new Date().toISOString());

@@ -4,21 +4,21 @@
  * Die Typen dieser Datei beschreiben genau das, was zwischen Sandbox und
  * Backend über den HTTP-Callback läuft (Abschnitt 7.2.5), sowie die Form,
  * in der ein Review im Backend abgelegt wird. Die Sandbox hält in
- * `sandbox/src/types.ts` eine deckungsgleiche Kopie, damit sie unabhängig
- * vom Next.js-Projekt gebaut werden kann.
+ * `sandbox/src/types.ts` eine Kopie der Callback-Typen, damit sie unabhängig
+ * vom Next.js-Projekt gebaut werden kann. `tests/contracts.ts` prüft die Übereinstimmung.
  */
 
 /** Dreiwertiges Urteil je Regel (FA-8). Nur `NC` erzeugt einen Kommentar. */
 export type Verdict = "C" | "NC" | "CIA";
 
-/** Herkunft der Regelbasis: Projekt-ADRs oder Gruppenstandard (FA-3). */
+/** Herkunft einer Regel: Projekt-ADR, Gruppenstandard oder Lernmodus. */
 export type RuleOrigin = "project" | "group" | "learning";
 export type RuleBaseOrigin = RuleOrigin | "combined";
 
-/** Eine aus einem ADR gewonnene, einzeln entscheidbare Regel (FA-1). */
+/** Einzelne ADR-Regel oder synthetische Regel für einen bestätigten Lernhinweis. */
 export interface Rule {
   id: string;
-  /** Imperativer Satz mit genau einer Aussage. */
+  /** Imperative ADR-Regel oder Titel des Lernhinweises. */
   text: string;
   /** Titel des Herkunfts-ADR, wandert in den Kommentartext. */
   adrTitle: string;
@@ -29,7 +29,7 @@ export interface Rule {
   adrSource?: { startLine: number; endLine: number; quote: string };
 }
 
-/** Belegstelle, die der Locator meldet und der Reader liest. */
+/** Originalstelle mit Codestand und Zeilenbereich für einen Befund. */
 export interface Evidence {
   path: string;
   revision?: "base";
@@ -59,12 +59,12 @@ export interface TokenUsage {
   totalTokens: number;
 }
 
-/** Ergebnis der Prüfung genau einer Regel auf genau einem Codestand. */
+/** Konkreter Befund zu einer Regel oder regelbezogenes Ergebnis ohne bestätigten Verstoß. */
 export interface Finding {
   id: string;
   rule: Rule;
   verdict: Verdict;
-  /** Begründung des Readers, gehört zu jedem Urteil (FA-8). */
+  /** Verifizierte Begründung bzw. Beschreibung der begrenzten Prüfaussage. */
   rationale: string;
   /** Folge und Korrektur bestätigter ADR- oder Lernbefunde. */
   consequence?: string;
@@ -76,16 +76,16 @@ export interface Finding {
   coverage?: { status: "no_violation" | "incomplete"; searches: number; reads: number; rejectedCandidates: number };
   trace: ToolCallTrace[];
   /**
-   * Das Werkzeugbudget dieser Regel war aufgebraucht (FA-7, Abschnitt 7.2.4).
+   * Das Werkzeug-/Kontextbudget der Verifikation bzw. einer Regelsuche war aufgebraucht.
    *
    * Wird protokolliert, aber weder am Merge Request noch auf der Detailseite
    * ausgewiesen: Die Marke traf in den Messläufen auf 94 % aller Befunde zu
    * und trennte damit sichere von unsicheren Urteilen nicht.
    */
   budgetExhausted: boolean;
-  /** Zahl der Modellaufrufe für diese Regel (NFA-7). */
+  /** Modellaufrufe der Einzelverifikation; gemeinsame Suchkosten stehen in der Laufstatistik. */
   modelCalls: number;
-  /** Tokenverbrauch der Modellaufrufe für diese Regel. */
+  /** Tokenverbrauch der Einzelverifikation. */
   tokenUsage?: TokenUsage;
 }
 
@@ -102,7 +102,7 @@ export interface DroppedRule {
   reason: string;
 }
 
-/** Nicht formatgerechte Modellantwort; wird verworfen, nicht gewertet (NFA-2). */
+/** Analysefehler einer Phase, etwa eine ungültige Modellantwort oder ein fehlender Pflichtbeleg. */
 export interface AgentFailure {
   /** `triage` heißt in der Oberfläche "Vorfilter"; siehe `STAGE_LABEL`. */
   stage: "extract" | "triage" | "locator" | "reader" | "learning";

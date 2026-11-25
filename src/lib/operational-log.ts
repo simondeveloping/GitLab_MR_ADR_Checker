@@ -108,7 +108,8 @@ export function pruneOperationalLogs(
   const cleanup = writes.then(async () => {
     const cutoff = now - LOG_RETENTION_MS;
     for (const file of ["application.log", "application.log.1", "containers.log", "containers.log.1"]) {
-      await pruneLogFile(join(directory, file), cutoff);
+      // Laufzeitdaten vom Host, keine mitzuliefernden Build-Abhängigkeiten.
+      await pruneLogFile(join(/* turbopackIgnore: true */ directory, file), cutoff);
     }
   });
   writes = cleanup.catch(() => undefined);

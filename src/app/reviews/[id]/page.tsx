@@ -3,9 +3,9 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowUpRight } from "lucide-react";
 import { FindingCard } from "@/components/reviews/finding-card";
 import { ReviewStats } from "@/components/reviews/review-stats";
-import { getReview } from "@/lib/store";
-import { findingsOf, VERDICT_LABEL, VERDICT_ORDER, withVerdict } from "@/lib/findings";
-import { loadFindingDiffs, type ReviewDiffHunk } from "@/lib/review-diff";
+import { getReview } from "@/lib/reviews/store";
+import { findingsOf, VERDICT_LABEL, VERDICT_ORDER, withVerdict } from "@/lib/reviews/findings";
+import { loadFindingDiffs, type ReviewDiffHunk } from "@/lib/reviews/diff";
 import ReviewProgress from "./ReviewProgress";
 
 export const dynamic = "force-dynamic";

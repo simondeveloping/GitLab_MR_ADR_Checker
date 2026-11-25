@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { groupByAdr, renderComment, renderSummary } from "../../src/lib/comment";
+import { groupForComments, renderComment, renderSummary } from "../../src/lib/gitlab/comment";
+import { publishFindings } from "../../src/lib/gitlab/publish";
 import { makeReview } from "../fixtures";
 
 test("ADR-Abschlusskommentar nennt nur die Anzahl der Verstöße", () => {
@@ -19,7 +20,21 @@ test("ADR-Abschlusskommentar nennt nur die Anzahl der Verstöße", () => {
   assert.equal(renderSummary(review), "Es wurden 2 Verstöße gefunden.");
 
   review.result!.findings = review.result!.findings.filter((item) => item.verdict !== "NC");
-  assert.equal(renderSummary(review), "Es wurden keine Verstöße gefunden.");
+  assert.equal(renderSummary(review), null);
+});
+
+test("ein Review ohne Verstöße veröffentlicht keinen GitLab-Kommentar", async () => {
+  const review = makeReview();
+  review.result!.mode = "architecture";
+  review.result!.findings = [
+    { ...review.result!.findings[0], verdict: "C" },
+    { ...review.result!.findings[0], id: "finding-2", verdict: "CIA" },
+  ];
+
+  assert.deepEqual(await publishFindings(review), { published: [], reported: 0 });
+
+  review.result!.findings = [];
+  assert.deepEqual(await publishFindings(review), { published: [], reported: 0 });
 });
 
 test("ADR-Befundkommentar enthält keinen Berichtslink", () => {
@@ -39,10 +54,41 @@ test("Architekturbefunde bekommen getrennte Positionen und konkrete Verbesserung
   finding.consequence = "Aufrufer bekommen einen falschen Wert.";
   finding.suggestion = "Den Rückgabewert an die Schnittstelle anpassen.";
   finding.rule.adrSource = { startLine: 10, endLine: 10, quote: "Nur diese Schnittstelle verwenden." };
-  assert.equal(groupByAdr([finding, { ...finding, id: "another" }]).size, 2);
+  assert.equal(groupForComments([finding, { ...finding, id: "another" }]).size, 2);
   assert.match(renderComment([finding]), /Mögliche Folge:.*falschen Wert/);
   assert.match(renderComment([finding]), /Verbesserung:.*Schnittstelle anpassen/);
   assert.match(renderComment([finding]), /001-architektur\.md:10-10.*Nur diese Schnittstelle verwenden/);
+});
+
+test("ADR-Kommentar verlinkt Code-Belege im geprüften Commit und gelöschte Zeilen im Basisstand", () => {
+  const review = makeReview();
+  review.mr.sha = "new-commit";
+  review.mr.diffRefs = { base_sha: "base-commit", head_sha: "new-commit", start_sha: "base-commit" };
+  const finding = review.result!.findings[0];
+  finding.rule = { ...finding.rule, origin: "project", adrFile: "001-architektur.md" };
+  finding.evidence = [
+    { path: "src/api client.ts", startLine: 8, endLine: 10, why: "Aufruf ohne Prüfung" },
+    { path: "src/alter code.ts", startLine: 4, endLine: 4, revision: "base", why: "Entfernte Prüfung" },
+  ];
+
+  const comment = renderComment([finding], review.mr);
+  assert.match(comment, /src\/api client\.ts:8-10.*Aufruf ohne Prüfung/);
+  assert.match(comment, /https?:\/\/127\.0\.0\.1:1\/test\/project\/-\/blob\/new-commit\/src\/api%20client\.ts#L8/);
+  assert.match(comment, /https?:\/\/127\.0\.0\.1:1\/test\/project\/-\/blob\/base-commit\/src\/alter%20code\.ts#L4/);
+  assert.match(comment, /src\/alter code\.ts:4.*vor der Änderung.*Entfernte Prüfung/);
+});
+
+test("Lernkommentar nennt Code-Stellen auch ohne Inline-Position und ohne Basis-Commit", () => {
+  const review = makeReview();
+  const finding = review.result!.findings[0];
+  finding.anchor = { path: "src/anker.ts", line: 12 };
+  finding.evidence = [{ path: "src/alt.ts", startLine: 3, endLine: 3, revision: "base", why: "Vorherige Implementierung" }];
+
+  const comment = renderComment([finding], review.mr);
+  assert.match(comment, /src\/anker\.ts:12/);
+  assert.match(comment, /\/blob\/abc123\/src\/anker\.ts#L12/);
+  assert.match(comment, /src\/alt\.ts:3.*vor der Änderung.*Vorherige Implementierung/);
+  assert.doesNotMatch(comment, /\/blob\/abc123\/src\/alt\.ts/);
 });
 
 test("lernfreundliche ADR-Erklärungen erscheinen vollständig im bestehenden Kommentar", () => {

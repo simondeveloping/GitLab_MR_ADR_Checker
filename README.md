@@ -31,12 +31,16 @@ Die Prüfung läuft in diesen Schritten:
    gemeinsam mit dem mitgelieferten Gruppenstandard aus `sandbox/standards/`
    verwendet. Fehlen gültige Projekt-ADRs, wird automatisch der Lernmodus
    aktiviert; Gruppenstandards lösen in diesem Fall keinen Architektur-Review aus.
+   Unterstützt werden Statusangaben als Abschnitt (`## Status`), YAML-Frontmatter
+   oder Kopfzeile (`- **Status:** Akzeptiert`). `LEARNING_USERS` steuert nur die
+   ausführlichere Erklärung bestätigter ADR-Verstöße, nicht den Prüfmodus.
    ADR-Dateien werden dabei nicht als Prüfgegenstand behandelt und aus dem
    Merge-Request-Diff für die Code-Prüfung ausgeschlossen. Enthält ein MR nur
    ADR-Änderungen oder herausgefiltertes Rauschen, gibt es nichts zu prüfen.
 2. Im Architekturmodus werden aus den ADRs MR-unabhängig einzelne, prüfbare Regeln mit
-   überprüftem Originalzitat und ADR-Zeilenangabe extrahiert. Ein unabhängiger
-   Quellencheck bewertet bis zu zwölf Regeln pro Modellaufruf. Die Triage ordnet
+   überprüftem Originalzitat und ADR-Zeilenangabe extrahiert. Ein deterministischer
+   Quellencheck prüft Zitat, Originalzeilen und die Zugehörigkeit zur expliziten
+   ADR-Entscheidung, sofern ein Entscheidungsabschnitt vorhanden ist. Die Triage ordnet
    Regeln anhand von Diffteilen, geänderten Zeilen und möglichen
    Schnittstellenbezügen zu. Eine gemeinsame Suche je Diffteil sammelt
    Verdachtsfälle für mehrere Regeln; eine zusätzliche Integrationssuche
@@ -70,12 +74,14 @@ Die Prüfung läuft in diesen Schritten:
    Teilergebnisse bleiben für die folgenden Phasen erhalten.
 4. Im Architekturmodus werden `NC`-Befunde einzeln an ihrer bestätigten
    geänderten Zeile platziert, mit ADR-Grundlage, Folge und Verbesserungsvorschlag. Im Lernmodus
-    werden konkrete Hinweise mit möglicher Folge und Verbesserungsvorschlag
-    einzeln veröffentlicht; die Kommentare sind ausdrücklich
+   werden konkrete Hinweise mit möglicher Folge und Verbesserungsvorschlag
+   einzeln veröffentlicht; die Kommentare sind ausdrücklich
    nicht blockierend. Befunde erscheinen, sofern möglich, als Inline-
    Diskussion an geänderten Zeilen. Andere Befunde sowie
    Werkzeugprotokolle und Laufdetails sind auf der Review-Seite des Backends
-   einsehbar. Ein Sammelkommentar im Merge Request verlinkt auf diese Seite.
+   einsehbar. Während des Laufs verlinkt ein temporärer Kommentar auf diese Seite.
+   Architektur-Reviews mit Verstößen erhalten abschließend einen Sammelkommentar
+   mit deren Anzahl; Lernreviews veröffentlichen nur die einzelnen Hinweise.
 
 Der Webhook antwortet mit HTTP `202`, ohne auf den mehrminütigen Prüflauf zu
 warten. Dadurch blockiert der Review keine CI/CD-Pipeline. Ausgelöst werden nur
@@ -156,6 +162,7 @@ mindestens folgende Werte ein:
 | `GITLAB_CONNECTIONS` | JSON-Liste mehrerer Verbindungen mit `host`, `token` und optional `projects`; wenn gesetzt, ersetzt sie `GITLAB_HOST` / `GITLAB_TOKEN` |
 | `GITLAB_WEBHOOK_SECRET` | Langes, zufälliges Geheimnis zur Prüfung eingehender GitLab-Webhooks |
 | `LLM_BASE_URL` | Basis-URL des OpenAI-kompatiblen Modell-Gateways, inklusive `/v1` falls erforderlich |
+| `LLM_CHAT_PATH` | Chat-Endpunkt relativ zu `LLM_BASE_URL` (Standard: `/chat/response`; alternativ z. B. `/chat/completions`) |
 | `LLM_API_KEY` | API-Schlüssel für das Modell-Gateway |
 | `LLM_MODEL` | Modellname, den das Gateway erwartet |
 | `PUBLIC_BASE_URL` | Im Browser und von GitLab erreichbare Backend-URL für Webhook und Links in Kommentaren |
@@ -594,6 +601,11 @@ npm --prefix sandbox ci
 npm --prefix sandbox run build
 ```
 
+`npm test` führt weiterhin alle Unit- und Integrationstests aus. Für einen
+einzelnen Bereich gibt es `npm run test:unit` und `npm run test:integration`.
+Unit-Tests prüfen isolierte Logik; Integrationstests prüfen das Zusammenspiel
+mit Dateisystem, lokalen Git-Repositories und simulierten HTTP-Diensten.
+
 Die Browser-Regressionstests prüfen Theme-Wechsel, Navigation, Suchfilter,
 Feedback, Fortschrittsaktualisierung und API-Validierung:
 
@@ -613,27 +625,83 @@ separaten TypeScript-Prüfkern aus `sandbox/src/` sowie die Gruppenstandards aus
 
 ## Projektstruktur
 
+```text
+src/
+  app/                   Seiten, Layouts und HTTP-Endpunkte
+  components/
+    ui/                  Allgemeine UI-Bausteine
+    reviews/             Review-Liste und Befunddarstellung
+    feedback/            Feedback-Komponenten
+    monitor/             Monitoring-Komponenten
+  lib/
+    reviews/             Review-Ablauf, Speicherung und Ergebnisaufbereitung
+    gitlab/              API-Client, Kommentartexte und Veröffentlichung
+    sandbox/             Containerstart und Fortschrittsauswertung
+sandbox/
+  src/
+    tools/               Repository-Zugriff, Werkzeugoperationen und Modellschemas
+  standards/             Mitgelieferte Regelbasis
+tests/
+  unit/                  Isolierte Logik
+  integration/           Zusammenspiel mehrerer Module und externer Schnittstellen
+  e2e/                   Browser- und HTTP-Regressionen am laufenden Backend
+```
+
 | Pfad | Zweck |
 | --- | --- |
 | `src/app/api/gitlab/webhook/` | Webhook-Authentifizierung und Auslösung neuer Reviews |
-| `src/lib/orchestrator.ts` | Lebenszyklus eines Reviews im Backend |
-| `src/lib/sandbox.ts` | Start und Überwachung des Podman-Containers |
+| `src/lib/reviews/orchestrator.ts` | Lebenszyklus eines Reviews im Backend |
+| `src/lib/sandbox/runner.ts`, `src/lib/sandbox/progress.ts` | Start und Überwachung des Podman-Containers sowie Fortschrittsauswertung |
 | `src/app/api/reviews/[id]/callback/` | Authentifizierter Rückweg der Prüfergebnisse |
-| `src/lib/publish.ts`, `src/lib/comment.ts` | Befunde formatieren und in GitLab veröffentlichen |
+| `src/lib/gitlab/client.ts`, `src/lib/gitlab/publish.ts`, `src/lib/gitlab/comment.ts` | GitLab ansprechen, Befunde formatieren und veröffentlichen |
 | `src/app/` | Übersichts- und Detailseiten und HTTP-Endpunkte |
-| `src/components/reviews/` | Befundkarten, Diff-Ausschnitte und Review-Kennzahlen |
+| `src/components/reviews/` | Review-Liste, Filter, Befundkarten, Diff-Ausschnitte und Kennzahlen |
 | `src/components/theme-provider.tsx`, `src/lib/theme.ts` | Gemeinsamer Theme-Zustand und Cookie-Konfiguration |
-| `src/lib/store.ts`, `src/lib/keyed-queue.ts` | Atomare JSON-Ablage und serialisierte Schreibzugriffe |
-| `src/lib/feedback.ts`, `src/lib/reviews.ts` | Feedback-Verarbeitung und kompakte Review-Ansichten |
+| `src/lib/reviews/store.ts`, `src/lib/keyed-queue.ts` | Atomare JSON-Ablage und serialisierte Schreibzugriffe |
+| `src/lib/reviews/feedback.ts`, `src/lib/reviews/summary.ts` | Feedback-Verarbeitung und kompakte Review-Ansichten |
+| `src/lib/reviews/diff.ts`, `src/lib/reviews/findings.ts`, `src/lib/reviews/tokens.ts` | Diff-Ausschnitte, Befundauswahl und Tokenverbrauch |
+| `src/lib/reviews/trigger.ts`, `src/lib/reviews/progress-stream.ts`, `src/lib/reviews/rule-cache.ts` | Eingangsfilter, Live-Fortschritt und Regelcache |
 | `sandbox/src/checkout.ts` | Repository auschecken und Änderungssatz vorbereiten |
 | `sandbox/src/rulebase.ts` | Automatisch Architektur- und Lernmodus wählen; Regelbasen kombinieren |
 | `sandbox/src/learning.ts` | Kandidaten sammeln, Integration prüfen, verifizieren, Dubletten entfernen und Kommentare formulieren |
-| `sandbox/src/learning-diff.ts`, `sandbox/src/learning-session.ts` | Diffteile mit Originalzeilen und budgetierte Repository-Sitzungen |
+| `sandbox/src/learning-findings.ts` | Lernkandidaten validieren, Dublettenreferenzen prüfen und bestätigte Befunde abbilden |
+| `sandbox/src/architecture-prompts.ts`, `sandbox/src/learning-prompts.ts` | Modellanweisungen der einzelnen Review-Phasen |
+| `sandbox/src/review-diff.ts`, `sandbox/src/review-changes.ts` | Gemeinsame Diffteile, Änderungszeilen und Diffanker beider Review-Modi |
+| `sandbox/src/learning-policy.ts` | Integrationsentscheidung des Lernmodus |
+| `sandbox/src/review-session.ts` | Budgetierte Repository-Sitzungen und gemeinsame Prüfung gelesener Pflichtbelege |
 | `sandbox/src/extract.ts`, `sandbox/src/triage.ts` | Regeln extrahieren und nach Diffteilen zuordnen |
-| `sandbox/src/architecture.ts`, `sandbox/src/tools.ts` | Verdachtsfälle gemeinsam suchen und einzeln verifizieren |
+| `sandbox/src/architecture.ts` | Architekturverdachtsfälle gemeinsam suchen und einzeln verifizieren |
+| `sandbox/src/tools.ts`, `sandbox/src/tools/` | Gemeinsamer Werkzeugeinstieg; getrennte Modellschemas, Operationen und Repository-Zugriffe |
 | `sandbox/src/callback.ts`, `sandbox/src/stats.ts` | Ergebnisübertragung und gemeinsame Laufstatistik |
 | `sandbox/standards/` | Mitgelieferte organisationsweite Regelbasis |
 | `tests/` | Browser- und Regressionstests sowie Prüfung des Callback-Typvertrags |
+
+### Orientierung bei Änderungen
+
+- **Ablaufsteuerung:** `sandbox/src/main.ts` wählt den Modus und bündelt das Ergebnis.
+  `architecture.ts` und `learning.ts` steuern die jeweiligen Review-Phasen,
+  Parallelität, Fortschritt und Fehlererfassung.
+- **Backend:** `src/lib/reviews/` bündelt den Review-Ablauf und die Datenaufbereitung.
+  `src/lib/gitlab/` kapselt GitLab-Aufrufe und Kommentare; `src/lib/sandbox/`
+  steuert den Container. Allgemeine Konfiguration, Typen und Hilfsfunktionen liegen
+  direkt in `src/lib/`. Browser-Komponenten importieren gezielt darstellungsbezogene
+  Module wie `reviews/summary.ts` und `reviews/findings.ts`.
+- **Modellverhalten:** Die `*-prompts.ts` enthalten die Anweisungen; Modelle und
+  Budgets werden in `sandbox/src/config.ts` festgelegt. Auch reine Textänderungen
+  an Prompts können die Prüfergebnisse beeinflussen.
+- **Ergebnisprüfung:** `review-session.ts` prüft, ob Belege tatsächlich gelesen
+  wurden und Anker sowie Pflichtdateien abdecken. Die modusspezifische Prüfung
+  ergänzt ADR- bzw. Lernhinweisfelder. `learning-findings.ts` übernimmt die
+  bestätigten Lernhinweise in das gemeinsame Ergebnisformat.
+- **Werkzeuge:** `tools.ts` ist der gemeinsame Einstiegspunkt. `tools/definitions.ts`
+  beschreibt die Modellschnittstelle, `tools/operations.ts` führt die Werkzeuge aus
+  und protokolliert sie; `tools/repository.ts` verwaltet Suchraum und Dateizugriff.
+- **Backend und Sandbox:** Beide werden separat gebaut. Änderungen am
+  Ergebnisformat müssen in beiden `types.ts` zusammenpassen; der Typecheck
+  kontrolliert dies über `tests/contracts.ts`.
+- **Regressionen:** Die Pipeline-Tests unter `tests/integration/` verwenden lokale
+  Git-Repositories und ein simuliertes Modell-Gateway. Sie prüfen unter anderem
+  Modellaufrufe, Modi, Löschungen, Belegpflichten, Dubletten und die Übergabe per Callback.
 
 ## Grenzen des Prototyps
 
